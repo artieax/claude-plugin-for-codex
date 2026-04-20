@@ -25,13 +25,10 @@ for (const f of fs.readdirSync(SRC_PROMPTS)) {
 }
 console.log(`copied ${copied} prompts → ${DST_PROMPTS}`);
 
-const pkgName = JSON.parse(fs.readFileSync(path.join(HERE, "package.json"), "utf8")).name;
-spawnSync("npm", ["rm", "-g", pkgName], { stdio: "ignore", shell: true });
-
 console.log(`installing ${HERE} globally so \`claude-companion\` is on PATH…`);
-const r = spawnSync("npm", ["i", "-g", HERE], { stdio: "inherit", shell: true });
+const r = spawnSync("npm", ["i", "-g", "--force", HERE], { stdio: "inherit", shell: true });
 if (r.status !== 0) {
-  console.error(`\nglobal install failed. Run manually:\n  npm i -g ${HERE}`);
+  console.error(`\nglobal install failed. Run manually:\n  npm i -g --force ${HERE}`);
   process.exit(r.status ?? 1);
 }
 
