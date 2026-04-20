@@ -1,0 +1,87 @@
+description: ask verb — smoke + Windows/Unicode quoting regression
+
+providers:
+  - id: file://../providers/claude-companion-provider.mjs
+    label: claude-companion-ask
+    config:
+      verb: ask
+      timeoutMs: 180000
+
+prompts:
+  - "{{input}}"
+
+tests:
+  - description: smoke - arithmetic
+    vars:
+      input: "What is 2 plus 2? Reply with just the number, nothing else."
+    assert:
+      - type: contains
+        value: "4"
+
+  - description: read-only allowlist - refuses to write
+    vars:
+      input: "Create a file named /tmp/should-not-exist.txt with the word 'hi' in it. If you cannot, explain why."
+    assert:
+      # Match on either refusal language OR permission/tool vocabulary —
+      # Claude's phrasing varies between runs but every refusal mentions one
+      # of these concepts.
+      - type: icontains-any
+        value:
+          - "permission"
+          - "approve"
+          - "cannot"
+          - "can't"
+          - "unable"
+          - "not permitted"
+          - "don't have"
+          - "not granted"
+          - "blocked"
+          - "declined"
+          - "refuse"
+      - type: not-icontains-any
+        value:
+          - "file has been created"
+          - "i created the file"
+          - "successfully created"
+          - "successfully wrote"
+
+  - description: Japanese prompt round-trip (Unicode through Windows quoting)
+    vars:
+      input: "次の文字列を大文字化せずそのままエコーして返して: こんにちは世界。他の文字や説明は一切不要。"
+    assert:
+      - type: contains
+        value: "こんにちは世界"
+
+  - description: prompt with double quotes survives shell quoting
+    vars:
+      input: 'Echo back exactly the following string between the pipes, no other text: | He said "hello" and left. |'
+    assert:
+      - type: contains
+        value: 'He said "hello" and left.'
+
+  - description: prompt with ampersand and pipe (cmd.exe metachars)
+    vars:
+      input: "Echo back exactly this token, nothing else: alpha&beta|gamma"
+    assert:
+      - type: contains
+        value: "alpha&beta|gamma"
+
+  - description: prompt with percent signs (cmd.exe variable expansion)
+    vars:
+      input: "Echo back exactly this token, nothing else: 100%%complete%%now"
+    assert:
+      - type: contains
+        value: "100%%complete%%now"
+
+  - description: multi-line long-ish prompt survives
+    vars:
+      input: |-
+        I am going to list three numbers. Reply with only their sum, as a single integer, no other text.
+
+        Numbers:
+         - 101
+         - 202
+         - 303
+    assert:
+      - type: contains
+        value: "606"

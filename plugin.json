@@ -1,0 +1,44 @@
+{
+  "name": "claude-plugin-for-codex",
+  "version": "0.1.0",
+  "description": "Delegate work from Codex CLI to Claude Code",
+  "author": { "name": "artieax" },
+  "homepage": "https://github.com/artieax/claude-plugin-for-codex",
+  "license": "Apache-2.0",
+  "target": "codex",
+  "commands": [
+    {
+      "name": "claude-ask",
+      "file": "prompts/claude-ask.md",
+      "description": "Delegate a read-only task or question to Claude Code."
+    },
+    {
+      "name": "claude-review",
+      "file": "prompts/claude-review.md",
+      "description": "Have Claude review the current git diff."
+    },
+    {
+      "name": "claude-status",
+      "file": "prompts/claude-status.md",
+      "description": "List active and recent Claude delegation jobs."
+    },
+    {
+      "name": "claude-result",
+      "file": "prompts/claude-result.md",
+      "description": "Fetch the stored output of a finished job."
+    },
+    {
+      "name": "claude-cancel",
+      "file": "prompts/claude-cancel.md",
+      "description": "Cancel a running Claude delegation job."
+    },
+    {
+      "name": "claude-setup",
+      "file": "prompts/claude-setup.md",
+      "description": "Diagnose installation and Claude CLI auth."
+    }
+  ],
+  "bin": {
+    "claude-companion": "scripts/claude-companion.mjs"
+  }
+}

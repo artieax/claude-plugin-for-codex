@@ -1,0 +1,58 @@
+export function parseArgs(tokens, { booleanFlags = new Set() } = {}) {
+  const flags = new Map();
+  const positional = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (typeof t !== "string") continue;
+    if (t.startsWith("--")) {
+      const name = t.slice(2);
+      if (booleanFlags.has(name)) {
+        flags.set(name, true);
+        continue;
+      }
+      const next = tokens[i + 1];
+      if (next != null && !String(next).startsWith("--")) {
+        flags.set(name, next);
+        i++;
+      } else {
+        flags.set(name, true);
+      }
+    } else {
+      positional.push(t);
+    }
+  }
+  return { flags, positional };
+}
+
+export function splitRawArgumentString(raw) {
+  if (raw == null) return [];
+  const s = String(raw);
+  const tokens = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quote) {
+      if (ch === "\\" && i + 1 < s.length) {
+        cur += s[++i];
+      } else if (ch === quote) {
+        cur += ch;
+        quote = null;
+      } else {
+        cur += ch;
+      }
+    } else if (ch === "'" || ch === '"') {
+      cur += ch;
+      quote = ch;
+    } else if (/\s/.test(ch)) {
+      if (cur) {
+        tokens.push(cur);
+        cur = "";
+      }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) tokens.push(cur);
+  return tokens;
+}

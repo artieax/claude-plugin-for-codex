@@ -1,0 +1,32 @@
+{
+  "name": "@artieax/claude-plugin-for-codex",
+  "version": "0.1.0",
+  "description": "Codex CLI add-on that delegates work to Claude Code via shell-out (no MCP).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "claude-plugin-for-codex": "install.mjs",
+    "claude-companion": "scripts/claude-companion.mjs"
+  },
+  "scripts": {
+    "eval": "node evals/run-all.mjs",
+    "eval:ask": "promptfoo eval -c evals/suites/ask.yaml",
+    "eval:review": "promptfoo eval -c evals/suites/review.yaml",
+    "eval:background": "promptfoo eval -c evals/suites/background.yaml",
+    "eval:view": "promptfoo view"
+  },
+  "files": [
+    "scripts",
+    "prompts",
+    "install.mjs",
+    "plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "devDependencies": {
+    "promptfoo": "^0.121.5"
+  }
+}

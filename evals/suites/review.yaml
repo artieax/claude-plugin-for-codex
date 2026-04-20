@@ -1,0 +1,30 @@
+description: review verb — off-by-one bug detection in fixture diff
+
+providers:
+  - id: file://../providers/claude-companion-provider.mjs
+    label: claude-companion-review
+    config:
+      verb: review
+      fixture: review
+      extraArgs: ["--base", "main"]
+      timeoutMs: 300000
+
+prompts:
+  - "{{input}}"
+
+tests:
+  - description: review catches off-by-one in sumToN
+    vars:
+      input: ""
+    assert:
+      - type: icontains-any
+        value:
+          - "off-by-one"
+          - "off by one"
+          - "i < n"
+          - "should be <= n"
+          - "excludes n"
+          - "does not include n"
+          - "missing n"
+      - type: icontains
+        value: "sumToN"

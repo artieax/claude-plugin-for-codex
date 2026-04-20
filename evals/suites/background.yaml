@@ -1,0 +1,23 @@
+description: ask verb in background mode — job lifecycle + correct result
+
+providers:
+  - id: file://../providers/claude-companion-provider.mjs
+    label: claude-companion-ask-bg
+    config:
+      verb: ask
+      mode: background
+      timeoutMs: 240000
+
+prompts:
+  - "{{input}}"
+
+tests:
+  - description: background ask completes (pending -> running -> done) with correct answer
+    vars:
+      input: "What is 5 times 6? Reply with just the number, nothing else."
+    # The provider fails loudly if the job did not reach status=done with
+    # exitCode=0, so any successful output here implies the full pending ->
+    # running -> done lifecycle ran through the job state file.
+    assert:
+      - type: contains
+        value: "30"
