@@ -29,6 +29,10 @@ claude-companion <verb> "$ARGUMENTS"
 
 ```
 claude-plugin-for-codex/
+├── .codex-plugin/                      # official Codex plugin entry point
+│   ├── plugin.json                     # plugin manifest (skills, install hook)
+│   └── skills/
+│       └── claude-companion/SKILL.md   # skill description for Codex
 ├── prompts/                            # drop into ~/.codex/prompts/
 │   ├── claude-ask.md
 │   ├── claude-review.md
@@ -46,7 +50,6 @@ claude-plugin-for-codex/
 │       ├── render.mjs                  # status table / job view
 │       └── state.mjs                   # ~/.claude-plugin-for-codex/jobs/<id>.json
 ├── install.mjs                         # copies prompts → ~/.codex/prompts/
-├── plugin.json                         # informational manifest
 ├── package.json                        # exposes `claude-companion` via bin
 └── README.md
 ```

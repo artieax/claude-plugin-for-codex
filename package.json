@@ -23,8 +23,8 @@
     "scripts",
     "prompts",
     "test",
+    ".codex-plugin",
     "install.mjs",
-    "plugin.json",
     "README.md",
     "LICENSE"
   ],

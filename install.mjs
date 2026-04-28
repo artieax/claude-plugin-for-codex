@@ -9,6 +9,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC_PROMPTS = path.join(HERE, "prompts");
 const DST_PROMPTS = path.join(os.homedir(), ".codex", "prompts");
 const PKG_NAME = "@artieax/claude-plugin-for-codex";
+// This package is distributed via GitHub (not the npm registry), so install /
+// upgrade routes through `npm i -g github:...` rather than `npm update -g`.
+const GH_SPEC = "github:artieax/claude-plugin-for-codex";
 
 const USAGE = `Usage: claude-plugin-for-codex <subcommand> [--dry-run]
 
@@ -30,9 +33,12 @@ if (!["install", "uninstall", "upgrade", "doctor"].includes(sub)) {
 
 function log(msg) { console.log(msg); }
 function dry(msg) { if (dryRun) console.log(`[dry-run] ${msg}`); }
+// shell:true is only needed on Windows (npm/.cmd shims). On POSIX we keep
+// shell:false so argv elements never reach a shell parser.
+const NEEDS_SHELL = process.platform === "win32";
 function exec(cmd, cmdArgs, opts = {}) {
   if (dryRun) { dry(`${cmd} ${cmdArgs.join(" ")}`); return { status: 0 }; }
-  return spawnSync(cmd, cmdArgs, { stdio: "inherit", shell: true, ...opts });
+  return spawnSync(cmd, cmdArgs, { stdio: "inherit", shell: NEEDS_SHELL, ...opts });
 }
 
 // ── install ────────────────────────────────────────────────────────────────
@@ -53,13 +59,12 @@ function copyPrompts() {
 
 function globalInstall() {
   log(`installing ${PKG_NAME} globally so \`claude-companion\` is on PATH…`);
-  const r = exec("npm", ["i", "-g", HERE]);
+  // --force overwrites stale shim files left by prior `npm link` registrations
+  // under a pre-scoped name (e.g. unscoped `claude-plugin-for-codex`).
+  const r = exec("npm", ["i", "-g", "--force", HERE]);
   if (r.status !== 0) {
     console.error(
-      `\nglobal install failed. If there is a conflicting version, run:\n` +
-      `  npm uninstall -g ${PKG_NAME}\n` +
-      `then try again, or run:\n` +
-      `  npm i -g --force ${HERE}`,
+      `\nglobal install failed. Run manually:\n  npm i -g --force ${HERE}`,
     );
     process.exit(r.status ?? 1);
   }
@@ -93,10 +98,13 @@ function globalUninstall() {
 // ── upgrade ────────────────────────────────────────────────────────────────
 
 function globalUpgrade() {
-  log(`upgrading ${PKG_NAME} from npm…`);
-  const r = exec("npm", ["update", "-g", PKG_NAME]);
+  // GitHub-installed packages don't get version bumps from `npm update`, so we
+  // re-resolve the spec instead. --force is needed for the same reason as in
+  // globalInstall (stale shim files from earlier link registrations).
+  log(`upgrading ${PKG_NAME} from ${GH_SPEC}…`);
+  const r = exec("npm", ["i", "-g", "--force", GH_SPEC]);
   if (r.status !== 0) {
-    console.error(`npm update returned non-zero. Try: npm i -g ${PKG_NAME}`);
+    console.error(`upgrade failed. Run manually: npm i -g --force ${GH_SPEC}`);
     process.exit(r.status ?? 1);
   }
 }
@@ -122,7 +130,7 @@ function doctor() {
     ok = false;
   }
 
-  const companionCheck = spawnSync("claude-companion", ["--help"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: true });
+  const companionCheck = spawnSync("claude-companion", ["--help"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: NEEDS_SHELL });
   if (companionCheck.status === 0 || companionCheck.stdout) {
     log(`claude-companion: OK`);
   } else {
@@ -159,7 +167,18 @@ switch (sub) {
     break;
   case "upgrade":
     globalUpgrade();
-    copyPrompts();
+    // After the global install completes, the bin we're running (HERE) is the
+    // pre-upgrade copy, so its prompts are stale. Hand off to the *new* global
+    // bin to do the prompt sync from the freshly-installed package.
+    {
+      const r = exec("claude-plugin-for-codex", ["install"]);
+      if (r.status !== 0) {
+        console.error(
+          "post-upgrade prompt sync failed. Run manually: claude-plugin-for-codex install",
+        );
+        process.exit(r.status ?? 1);
+      }
+    }
     log("upgrade complete.");
     break;
   case "doctor":

@@ -1,3 +1,8 @@
+---
+name: claude-companion
+description: Delegate read-only tasks from Codex to Claude Code (ask, review, status/result/cancel jobs). Triggers when the user wants a second-opinion review from Claude, asks Claude to inspect a repo, or runs a background Claude job from inside Codex.
+---
+
 # claude-companion
 
 Delegates tasks from Codex to Claude Code as a background or inline subprocess.

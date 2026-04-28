@@ -316,6 +316,9 @@ async function cmdWorker(tokens) {
   if (!id) process.exit(2);
   const job = readJob(id);
   if (!job) process.exit(2);
+  // pending → cancelled race: if cancel landed before the worker started,
+  // exit cleanly instead of resurrecting the job to "running".
+  if (job.status === "cancelled") process.exit(0);
   upsertJob({ id, status: "running", pid: process.pid });
   const { child, done } = spawnClaude(job.argv, {
     cwd: job.cwd,
