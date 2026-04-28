@@ -69,6 +69,20 @@ Verify:
 
 ```sh
 claude-companion setup
+# or
+claude-plugin-for-codex doctor
+```
+
+To uninstall:
+
+```sh
+claude-plugin-for-codex uninstall
+```
+
+To upgrade to the latest version:
+
+```sh
+claude-plugin-for-codex upgrade
 ```
 
 ## Use
@@ -81,6 +95,10 @@ claude-companion setup
 /claude-result 4f8b1a9c2d01
 /claude-cancel 4f8b1a9c2d01
 ```
+
+> **Codex version note:** Depending on your Codex build, custom prompts may appear in the slash-command menu as `/claude-ask` or `/prompts:claude-ask`. Run `/` in Codex to see which form your version uses. Both work identically.
+
+> **`--focus` tip:** Multi-word focus strings do not require quoting — `/claude-review --focus auth middleware` works as-is. Quoted forms also work: `--focus "auth middleware"`.
 
 Direct CLI usage (without Codex) also works:
 

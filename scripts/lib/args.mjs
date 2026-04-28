@@ -1,4 +1,6 @@
-export function parseArgs(tokens, { booleanFlags = new Set() } = {}) {
+// restFlags: flag names whose value consumes all remaining tokens until the next --flag.
+// Useful for --focus auth middleware (no quoting required).
+export function parseArgs(tokens, { booleanFlags = new Set(), restFlags = new Set() } = {}) {
   const flags = new Map();
   const positional = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -8,6 +10,16 @@ export function parseArgs(tokens, { booleanFlags = new Set() } = {}) {
       const name = t.slice(2);
       if (booleanFlags.has(name)) {
         flags.set(name, true);
+        continue;
+      }
+      if (restFlags.has(name)) {
+        const rest = [];
+        for (let j = i + 1; j < tokens.length; j++) {
+          if (String(tokens[j]).startsWith("--")) break;
+          rest.push(tokens[j]);
+          i = j;
+        }
+        flags.set(name, rest.join(" "));
         continue;
       }
       const next = tokens[i + 1];
@@ -36,14 +48,12 @@ export function splitRawArgumentString(raw) {
       if (ch === "\\" && i + 1 < s.length) {
         cur += s[++i];
       } else if (ch === quote) {
-        cur += ch;
-        quote = null;
+        quote = null; // close quote — do not add the quote char to the token
       } else {
         cur += ch;
       }
     } else if (ch === "'" || ch === '"') {
-      cur += ch;
-      quote = ch;
+      quote = ch; // open quote — do not add the quote char to the token
     } else if (/\s/.test(ch)) {
       if (cur) {
         tokens.push(cur);

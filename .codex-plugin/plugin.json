@@ -1,0 +1,14 @@
+{
+  "name": "claude-plugin-for-codex",
+  "version": "0.1.0",
+  "description": "Delegate work from Codex CLI to Claude Code (no MCP required)",
+  "author": "artieax",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/artieax/claude-plugin-for-codex",
+  "skills": [
+    "skills/claude-companion"
+  ],
+  "install": {
+    "run": "node ../install.mjs install"
+  }
+}

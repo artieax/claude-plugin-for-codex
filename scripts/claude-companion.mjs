@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, execSync } from "node:child_process";
+import { spawn, spawnSync, execSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -115,6 +115,7 @@ async function cmdAsk(tokens) {
 async function cmdReview(tokens) {
   const { flags, positional } = parseArgs(tokens, {
     booleanFlags: new Set(["background"]),
+    restFlags: new Set(["focus"]),
   });
   const background = flags.get("background") === true;
   const cwd = process.cwd();
@@ -188,14 +189,24 @@ function cmdCancel(tokens) {
     return;
   }
   if (job.pid) {
-    // Try killing the whole process group (worker + its claude child) first
-    try {
-      process.kill(-job.pid, "SIGTERM");
-    } catch {
+    if (process.platform === "win32") {
+      // Windows: negative PIDs are unsupported — use taskkill for tree kill
+      const pids = [job.claudePid, job.pid].filter(Number.isInteger);
+      for (const pid of pids) {
+        try {
+          spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+        } catch { /* already gone */ }
+      }
+    } else {
+      // POSIX: try process group kill (worker + claude child) first
       try {
-        process.kill(job.pid, "SIGTERM");
+        process.kill(-job.pid, "SIGTERM");
       } catch {
-        /* already gone */
+        try { process.kill(job.pid, "SIGTERM"); } catch { /* already gone */ }
+      }
+      // Also explicitly kill the claude child if we stored its PID
+      if (job.claudePid) {
+        try { process.kill(job.claudePid, "SIGTERM"); } catch { /* already gone */ }
       }
     }
   }
@@ -259,12 +270,19 @@ async function cmdWorker(tokens) {
   const job = readJob(id);
   if (!job) process.exit(2);
   upsertJob({ id, status: "running", pid: process.pid });
-  const { done } = spawnClaude(job.argv, {
+  const { child, done } = spawnClaude(job.argv, {
     cwd: job.cwd,
     onStdout: (s) => appendFile(jobLog(id), s),
     onStderr: (s) => appendFile(jobLog(id), s),
   });
+  // Store the Claude child PID so cancel can kill it on Windows too
+  if (child.pid) upsertJob({ id, claudePid: child.pid });
   const { exitCode, stdout, stderr } = await done;
+  // Don't overwrite a job that was cancelled while we were running
+  const current = readJob(id);
+  if (current?.status === "cancelled") {
+    process.exit(exitCode);
+  }
   upsertJob({
     id,
     status: exitCode === 0 ? "done" : "failed",
@@ -273,6 +291,7 @@ async function cmdWorker(tokens) {
     stderr,
     endedAt: new Date().toISOString(),
     pid: null,
+    claudePid: null,
     summary: summarize(stdout),
   });
   process.exit(exitCode);

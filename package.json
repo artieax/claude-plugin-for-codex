@@ -12,6 +12,7 @@
     "claude-companion": "scripts/claude-companion.mjs"
   },
   "scripts": {
+    "test": "node --test 'test/*.test.mjs'",
     "eval": "node evals/run-all.mjs",
     "eval:ask": "promptfoo eval -c evals/suites/ask.yaml",
     "eval:review": "promptfoo eval -c evals/suites/review.yaml",
@@ -21,6 +22,7 @@
   "files": [
     "scripts",
     "prompts",
+    "test",
     "install.mjs",
     "plugin.json",
     "README.md",
