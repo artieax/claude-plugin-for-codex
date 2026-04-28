@@ -211,6 +211,42 @@ test("upsertJob: redacts by default (no env var set)", () => {
   }
 });
 
+test("upsertJob: redacts argv strings as belt-and-suspenders", () => {
+  // The dispatcher now persists structured {kind, prompt, ...} instead of
+  // argv, but if a caller ever stores argv we must scrub secrets from it too.
+  const prev = process.env.CLAUDE_COMPANION_REDACT;
+  delete process.env.CLAUDE_COMPANION_REDACT;
+  try {
+    const ghp = "ghp_" + "g".repeat(36);
+    upsertJob({
+      id: "redact-argv",
+      kind: "ask",
+      status: "pending",
+      argv: ["-p", `leak=${ghp}`, "--allowedTools", "Read"],
+    });
+    const j = readJob("redact-argv");
+    assert.deepEqual(j.argv.slice(2), ["--allowedTools", "Read"]);
+    assert.match(j.argv[1], /\[REDACTED\]/);
+    assert.doesNotMatch(j.argv[1], new RegExp(ghp));
+  } finally {
+    if (prev !== undefined) process.env.CLAUDE_COMPANION_REDACT = prev;
+  }
+});
+
+test("upsertJob: redacts focus string", () => {
+  const prev = process.env.CLAUDE_COMPANION_REDACT;
+  delete process.env.CLAUDE_COMPANION_REDACT;
+  try {
+    const ghp = "ghp_" + "h".repeat(36);
+    upsertJob({ id: "redact-focus", kind: "review", status: "pending", focus: `audit ${ghp}` });
+    const j = readJob("redact-focus");
+    assert.match(j.focus, /\[REDACTED\]/);
+    assert.doesNotMatch(j.focus, new RegExp(ghp));
+  } finally {
+    if (prev !== undefined) process.env.CLAUDE_COMPANION_REDACT = prev;
+  }
+});
+
 test("upsertJob: stores raw stdout when CLAUDE_COMPANION_REDACT=0", () => {
   const prev = process.env.CLAUDE_COMPANION_REDACT;
   process.env.CLAUDE_COMPANION_REDACT = "0";

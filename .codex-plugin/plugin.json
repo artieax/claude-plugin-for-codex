@@ -5,9 +5,8 @@
   "author": "artieax",
   "license": "Apache-2.0",
   "homepage": "https://github.com/artieax/claude-plugin-for-codex",
-  "skills": [
-    "skills/claude-companion"
-  ],
+  "repository": "https://github.com/artieax/claude-plugin-for-codex",
+  "skills": "./skills/",
   "install": {
     "run": "node ../install.mjs install"
   }

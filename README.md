@@ -17,23 +17,23 @@ This is a small bridge that lets Codex ask Claude Code for a second opinion with
 
 `/claude-review` is not a replacement for Codex's built-in `/review`. It delegates to Claude Code as a separate agent, giving you a second opinion from a different model and reasoning pipeline.
 
-All six are Codex custom prompts in `prompts/`. Each one is a thin wrapper that tells Codex to shell out to:
+There are three ways to drive these commands, in order of preference:
 
-```bash
-claude-companion <verb> "$ARGUMENTS"
-```
+1. **Codex plugin + skill** *(primary)* — `.codex-plugin/plugin.json` + `skills/claude-companion/SKILL.md`. Codex auto-discovers the skill by name/description and surfaces it in the slash menu. This is what the OpenAI Codex docs steer new add-ons toward.
+2. **Codex custom prompts** *(legacy fallback)* — the `.md` files in `prompts/`, copied to `~/.codex/prompts/`. Custom Prompts are deprecated upstream in favor of skills, but they still work and remain useful for older Codex builds. The installer drops them in for compatibility.
+3. **Direct CLI** — `claude-companion ask|review|status|…` works from any shell, no Codex required.
 
-`claude-companion` is the dispatcher script (`scripts/claude-companion.mjs`). It builds the right `claude` CLI invocation (with a read-only tool allowlist), spawns it, captures stdout/stderr, and persists per-job state under `~/.claude-plugin-for-codex/jobs/`.
+All three call into the same dispatcher: `scripts/claude-companion.mjs`. It builds the right `claude` CLI invocation (with a read-only tool allowlist), spawns it, captures stdout/stderr, and persists per-job state under `~/.claude-plugin-for-codex/jobs/`.
 
 ## Architecture
 
 ```
 claude-plugin-for-codex/
-├── .codex-plugin/                      # official Codex plugin entry point
-│   ├── plugin.json                     # plugin manifest (skills, install hook)
-│   └── skills/
-│       └── claude-companion/SKILL.md   # skill description for Codex
-├── prompts/                            # drop into ~/.codex/prompts/
+├── .codex-plugin/
+│   └── plugin.json                     # plugin manifest (per Codex spec)
+├── skills/
+│   └── claude-companion/SKILL.md       # skill description for Codex
+├── prompts/                            # legacy custom prompts (~/.codex/prompts/)
 │   ├── claude-ask.md
 │   ├── claude-review.md
 │   ├── claude-status.md
@@ -49,7 +49,7 @@ claude-plugin-for-codex/
 │       ├── git.mjs                     # repo + base-branch detection
 │       ├── render.mjs                  # status table / job view
 │       └── state.mjs                   # ~/.claude-plugin-for-codex/jobs/<id>.json
-├── install.mjs                         # copies prompts → ~/.codex/prompts/
+├── install.mjs                         # copies prompts + global-installs the bin
 ├── package.json                        # exposes `claude-companion` via bin
 └── README.md
 ```
@@ -62,11 +62,17 @@ claude-plugin-for-codex/
 
 ## Install
 
+### As a Codex plugin (recommended)
+
+If your Codex build supports the plugin layout under `.codex-plugin/`, point Codex at this repo and it will pick up the skill in `skills/claude-companion/`. The skill's `name`/`description` make it explicit-callable (`/claude-companion …`) and implicit-callable when Codex thinks a delegation to Claude is appropriate. The `install.run` hook in `plugin.json` shells out to the same installer described below, which puts `claude-companion` on your PATH.
+
+### One-shot npx (works everywhere)
+
 ```sh
 npx github:artieax/claude-plugin-for-codex install
 ```
 
-That one command clones this repo, copies the prompts into `~/.codex/prompts/`, and puts `claude-companion` on your PATH (via a global npm install). Then in Codex, `/claude-setup`, `/claude-ask`, etc. appear in the slash-command list.
+That one command clones this repo, copies the legacy custom prompts into `~/.codex/prompts/`, and puts `claude-companion` on your PATH (via a global npm install). The legacy prompts are kept around so Codex builds without skill support still get `/claude-setup`, `/claude-ask`, etc. in the slash-command list.
 
 Verify:
 

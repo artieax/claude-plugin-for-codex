@@ -71,9 +71,11 @@ function summarize(stdout) {
     ?.slice(0, 80) ?? "";
 }
 
-async function runInline(kind, argv, cwd, prompt) {
+async function runInline(kind, argv, cwd, prompt, extra = {}) {
   const id = generateJobId();
-  upsertJob({ id, kind, status: "running", argv, cwd, prompt, pid: process.pid });
+  // Persist a structured payload (no argv) so on-disk records never embed the
+  // raw `-p <prompt>` slot. Worker rebuilds argv from {kind, prompt, base, focus}.
+  upsertJob({ id, kind, status: "running", cwd, prompt, pid: process.pid, ...extra });
   const { done } = spawnClaude(argv, {
     cwd,
     onStdout: (s) => {
@@ -99,9 +101,11 @@ async function runInline(kind, argv, cwd, prompt) {
   if (exitCode !== 0) process.exit(exitCode);
 }
 
-function spawnWorker(kind, argv, cwd, prompt) {
+function spawnWorker(kind, cwd, prompt, extra = {}) {
   const id = generateJobId();
-  upsertJob({ id, kind, status: "pending", argv, cwd, prompt });
+  // Persist a structured payload (no argv) so on-disk records never embed the
+  // raw `-p <prompt>` slot. Worker rebuilds argv from {kind, prompt, base, focus}.
+  upsertJob({ id, kind, status: "pending", cwd, prompt, ...extra });
   const child = spawn(process.execPath, [COMPANION, "__worker", id], {
     cwd,
     detached: true,
@@ -128,7 +132,7 @@ async function cmdAsk(tokens) {
   }
   const argv = buildAskArgv({ prompt });
   if (background) {
-    const id = spawnWorker("ask", argv, process.cwd(), prompt);
+    const id = spawnWorker("ask", process.cwd(), prompt);
     process.stdout.write(
       `Started background job ${id}. Check with \`/claude-status ${id}\` or \`/claude-result ${id}\`.\n`,
     );
@@ -183,10 +187,10 @@ async function cmdReview(tokens) {
     `Be concrete — quote file paths and line numbers.${focusLine}`;
   const argv = buildReviewArgv({ prompt });
   if (background) {
-    const id = spawnWorker("review", argv, cwd, prompt);
+    const id = spawnWorker("review", cwd, prompt, { base, focus });
     process.stdout.write(`Started background review job ${id}.\n`);
   } else {
-    await runInline("review", argv, cwd, prompt);
+    await runInline("review", argv, cwd, prompt, { base, focus });
   }
 }
 
@@ -319,8 +323,13 @@ async function cmdWorker(tokens) {
   // pending → cancelled race: if cancel landed before the worker started,
   // exit cleanly instead of resurrecting the job to "running".
   if (job.status === "cancelled") process.exit(0);
+  // Rebuild argv from the structured payload — we deliberately don't persist
+  // argv (would embed the raw -p prompt slot in the on-disk record).
+  const argv = job.kind === "review"
+    ? buildReviewArgv({ prompt: job.prompt })
+    : buildAskArgv({ prompt: job.prompt });
   upsertJob({ id, status: "running", pid: process.pid });
-  const { child, done } = spawnClaude(job.argv, {
+  const { child, done } = spawnClaude(argv, {
     cwd: job.cwd,
     onStdout: (s) => appendFile(jobLog(id), logChunk(s)),
     onStderr: (s) => appendFile(jobLog(id), logChunk(s)),

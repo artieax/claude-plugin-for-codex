@@ -22,6 +22,7 @@
   "files": [
     "scripts",
     "prompts",
+    "skills",
     "test",
     ".codex-plugin",
     "install.mjs",

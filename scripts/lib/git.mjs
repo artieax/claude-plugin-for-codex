@@ -60,16 +60,21 @@ function safeGit(args, cwd, opts = DIFF_OPTS) {
   }
 }
 
+// --no-ext-diff and --no-textconv disable user-configured external diff drivers
+// and textconv filters. On an untrusted repo, those gitattributes/config hooks
+// could otherwise execute arbitrary commands when we run `git diff`.
+const DIFF_HARDEN = ["--no-ext-diff", "--no-textconv"];
+
 export function diffShortstat(cwd, base) {
-  return safeGit(["diff", "--shortstat", `${base}...HEAD`], cwd).trim();
+  return safeGit(["diff", ...DIFF_HARDEN, "--shortstat", `${base}...HEAD`], cwd).trim();
 }
 
 export function gatherReviewDiffs(cwd, base) {
   return {
     status: safeGit(["status", "--short"], cwd),
-    diffStat: safeGit(["diff", "--stat"], cwd),
-    diff: safeGit(["diff"], cwd),
-    diffCached: safeGit(["diff", "--cached"], cwd),
-    diffBase: safeGit(["diff", `${base}...HEAD`], cwd),
+    diffStat: safeGit(["diff", ...DIFF_HARDEN, "--stat"], cwd),
+    diff: safeGit(["diff", ...DIFF_HARDEN], cwd),
+    diffCached: safeGit(["diff", ...DIFF_HARDEN, "--cached"], cwd),
+    diffBase: safeGit(["diff", ...DIFF_HARDEN, `${base}...HEAD`], cwd),
   };
 }

@@ -64,8 +64,13 @@ export function redactString(s) {
 function redactPartial(partial) {
   if (!redactionEnabled()) return partial;
   const out = { ...partial };
-  for (const k of ["stdout", "stderr", "summary", "prompt"]) {
+  for (const k of ["stdout", "stderr", "summary", "prompt", "focus"]) {
     if (typeof out[k] === "string") out[k] = redactString(out[k]);
+  }
+  // Belt-and-suspenders: argv slots are reconstructed at worker time and
+  // shouldn't be persisted, but if a caller ever stores them, scrub strings.
+  if (Array.isArray(out.argv)) {
+    out.argv = out.argv.map((v) => (typeof v === "string" ? redactString(v) : v));
   }
   return out;
 }

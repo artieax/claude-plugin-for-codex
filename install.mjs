@@ -114,7 +114,9 @@ function globalUpgrade() {
 function doctor() {
   let ok = true;
 
-  const claudeCheck = spawnSync("claude", ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  // shell: NEEDS_SHELL on Windows because `claude` ships as a .cmd shim;
+  // matches companionCheck below so doctor doesn't false-negative on Windows.
+  const claudeCheck = spawnSync("claude", ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: NEEDS_SHELL });
   if (claudeCheck.status === 0) {
     log(`claude CLI:  OK  (${claudeCheck.stdout.trim()})`);
   } else {
@@ -122,7 +124,7 @@ function doctor() {
     ok = false;
   }
 
-  const authCheck = spawnSync("claude", ["auth", "status"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const authCheck = spawnSync("claude", ["auth", "status"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: NEEDS_SHELL });
   if (authCheck.status === 0) {
     log(`claude auth: OK`);
   } else {
