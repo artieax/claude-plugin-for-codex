@@ -7,13 +7,15 @@ import { fileURLToPath } from "node:url";
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
 import { appendFile, readStdin } from "./lib/fs.mjs";
 import { buildAskArgv, buildReviewArgv, spawnClaude } from "./lib/claude.mjs";
-import { ensureGitRepo, resolveDefaultBase } from "./lib/git.mjs";
+import { ensureGitRepo, resolveDefaultBase, validateBase } from "./lib/git.mjs";
 import {
   ROOT,
   generateJobId,
+  jobFile,
   jobLog,
   latestJob,
   listJobsNewestFirst,
+  pruneJobs,
   readJob,
   upsertJob,
 } from "./lib/state.mjs";
@@ -30,6 +32,7 @@ function printUsage() {
       "  claude-companion status [<job-id>]",
       "  claude-companion result [<job-id>]",
       "  claude-companion cancel <job-id>",
+      "  claude-companion prune [--older-than <Nd|Nh|Nm>] [--all]",
       "  claude-companion setup",
       "",
     ].join("\n"),
@@ -119,15 +122,23 @@ async function cmdReview(tokens) {
     process.stderr.write("claude-companion review: not a git repository\n");
     process.exit(2);
   }
-  const base =
-    (typeof flags.get("base") === "string" ? flags.get("base") : null) ??
-    resolveDefaultBase(cwd);
+  const rawBase = typeof flags.get("base") === "string" ? flags.get("base") : null;
+  if (rawBase && !validateBase(cwd, rawBase)) {
+    process.stderr.write(`claude-companion review: invalid --base ref: ${rawBase}\n`);
+    process.exit(2);
+  }
+  const base = rawBase ?? resolveDefaultBase(cwd);
   const focusFromFlag = typeof flags.get("focus") === "string" ? flags.get("focus") : "";
   const focus = (focusFromFlag || positional.join(" ")).trim();
   const focusLine = focus ? `\n\nFocus: ${focus}` : "";
   const prompt =
-    `Review the current working tree's changes against \`${base}\`. ` +
-    `Run \`git diff ${base}...HEAD\` to see the changes. ` +
+    `Review the changes in this repository. ` +
+    `Run these commands in order: ` +
+    `(1) \`git status --short\`, ` +
+    `(2) \`git diff --stat\`, ` +
+    `(3) \`git diff\`, ` +
+    `(4) \`git diff --cached\`, ` +
+    `(5) \`git diff ${base}...HEAD\`. ` +
     `Report: (1) bugs or correctness issues, (2) security concerns, ` +
     `(3) test coverage gaps, (4) anything surprising. ` +
     `Be concrete — quote file paths and line numbers. ` +
@@ -177,10 +188,15 @@ function cmdCancel(tokens) {
     return;
   }
   if (job.pid) {
+    // Try killing the whole process group (worker + its claude child) first
     try {
-      process.kill(job.pid, "SIGTERM");
+      process.kill(-job.pid, "SIGTERM");
     } catch {
-      /* already gone */
+      try {
+        process.kill(job.pid, "SIGTERM");
+      } catch {
+        /* already gone */
+      }
     }
   }
   upsertJob({
@@ -190,6 +206,28 @@ function cmdCancel(tokens) {
     pid: null,
   });
   process.stdout.write(`Cancelled ${id}.\n`);
+}
+
+function cmdPrune(tokens) {
+  const { flags } = parseArgs(tokens, { booleanFlags: new Set(["all"]) });
+  const all = flags.get("all") === true;
+  const olderThanRaw = typeof flags.get("older-than") === "string" ? flags.get("older-than") : null;
+  let olderThanMs = null;
+  if (olderThanRaw) {
+    const m = olderThanRaw.match(/^(\d+)([dhm])$/);
+    if (!m) {
+      process.stderr.write("claude-companion prune: --older-than format must be e.g. 7d, 24h, 60m\n");
+      process.exit(2);
+    }
+    const multiplier = { d: 86400000, h: 3600000, m: 60000 }[m[2]];
+    olderThanMs = Number(m[1]) * multiplier;
+  }
+  if (!all && olderThanMs === null) {
+    process.stderr.write("claude-companion prune: pass --all or --older-than <Nd|Nh|Nm>\n");
+    process.exit(2);
+  }
+  const count = pruneJobs({ all, olderThanMs });
+  process.stdout.write(`Pruned ${count} job(s) from ${ROOT}\n`);
 }
 
 function cmdSetup() {
@@ -246,6 +284,7 @@ const DISPATCH = {
   status: cmdStatus,
   result: cmdResult,
   cancel: cmdCancel,
+  prune: cmdPrune,
   setup: cmdSetup,
   __worker: cmdWorker,
 };

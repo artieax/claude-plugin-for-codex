@@ -14,7 +14,15 @@ export function ensureGitRepo(cwd) {
 }
 
 export function resolveDefaultBase(cwd) {
-  for (const candidate of ["main", "master"]) {
+  const candidates = [
+    "origin/HEAD",
+    "origin/main",
+    "origin/master",
+    "upstream/main",
+    "main",
+    "master",
+  ];
+  for (const candidate of candidates) {
     try {
       run(`git rev-parse --verify ${candidate}`, cwd);
       return candidate;
@@ -23,6 +31,19 @@ export function resolveDefaultBase(cwd) {
     }
   }
   return "main";
+}
+
+// Allow only safe git ref characters to prevent shell injection via --base
+const SAFE_REF_RE = /^[\w/.\-@^~{}[\]]+$/;
+
+export function validateBase(cwd, base) {
+  if (!SAFE_REF_RE.test(base)) return false;
+  try {
+    run(`git rev-parse --verify ${base}`, cwd);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function diffShortstat(cwd, base) {

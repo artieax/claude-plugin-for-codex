@@ -11,12 +11,16 @@ export const REVIEW_TOOLS = [
   "Bash(git show:*)",
 ];
 
+const REVIEW_TOOL_NAMES = ["Read", "Grep", "Glob", "Bash"];
+
 export function buildAskArgv({
   prompt,
   allowedTools = READ_ONLY_TOOLS,
-  permissionMode = "default",
+  permissionMode = "dontAsk",
 }) {
   const argv = ["--output-format", "text", "--permission-mode", permissionMode];
+  // --tools restricts which tools Claude may use; --allowedTools bypasses the prompt
+  argv.push("--tools", READ_ONLY_TOOLS.join(","));
   argv.push("--allowedTools", ...allowedTools);
   argv.push("-p", prompt);
   return argv;
@@ -24,7 +28,9 @@ export function buildAskArgv({
 
 export function buildReviewArgv({ prompt }) {
   const argv = ["--output-format", "text"];
+  argv.push("--tools", REVIEW_TOOL_NAMES.join(","));
   argv.push("--allowedTools", ...REVIEW_TOOLS);
+  argv.push("--disallowedTools", "Edit", "Write", "MultiEdit");
   argv.push("-p", prompt);
   return argv;
 }

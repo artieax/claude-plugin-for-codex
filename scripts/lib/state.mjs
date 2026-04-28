@@ -50,3 +50,20 @@ export function listJobsNewestFirst() {
 export function latestJob() {
   return listJobsNewestFirst()[0] ?? null;
 }
+
+export function pruneJobs({ all = false, olderThanMs = null } = {}) {
+  const jobs = listJobsNewestFirst();
+  let pruned = 0;
+  for (const job of jobs) {
+    if (job.status === "running" || job.status === "pending") continue;
+    if (!all && olderThanMs === null) continue;
+    if (olderThanMs !== null) {
+      const createdAt = job.createdAt ? new Date(job.createdAt).getTime() : 0;
+      if (createdAt > Date.now() - olderThanMs) continue;
+    }
+    try { fs.unlinkSync(jobFile(job.id)); } catch { /* already gone */ }
+    try { fs.unlinkSync(jobLog(job.id)); } catch { /* already gone */ }
+    pruned++;
+  }
+  return pruned;
+}

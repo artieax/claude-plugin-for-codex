@@ -1,6 +1,8 @@
 # claude-plugin-for-codex
 
-A [Codex CLI](https://github.com/openai/codex) add-on that lets Codex delegate work to **Claude Code** in headless mode.
+Delegate from Codex CLI to Claude Code.
+
+This is a small bridge that lets Codex ask Claude Code for a second opinion without wiring MCP or replacing your Codex workflow. Use it when you want Claude to inspect a codebase while you stay inside Codex, get an independent review pass from a different coding agent, or run background Claude jobs while Codex continues the main session.
 
 ## What it provides
 
@@ -12,6 +14,8 @@ A [Codex CLI](https://github.com/openai/codex) add-on that lets Codex delegate w
 | `/claude-result` | Fetch the stored output of a finished job.                       |
 | `/claude-cancel` | Cancel a running job.                                            |
 | `/claude-setup`  | Diagnose the install and Claude CLI auth.                        |
+
+`/claude-review` is not a replacement for Codex's built-in `/review`. It delegates to Claude Code as a separate agent, giving you a second opinion from a different model and reasoning pipeline.
 
 All six are Codex custom prompts in `prompts/`. Each one is a thin wrapper that tells Codex to shell out to:
 
@@ -94,12 +98,20 @@ claude-companion status
 
 Both are plain files; delete the directory to wipe history.
 
+**Security note:** Job history is stored as plain JSON/log files under `~/.claude-plugin-for-codex/jobs/`. Outputs may include repository paths, code snippets, stack traces, or secrets from your working tree. Use `claude-companion prune` to clean up:
+
+```sh
+claude-companion prune --older-than 7d
+claude-companion prune --all
+```
+
 ## Safety posture
 
-`claude-companion ask` passes `--allowedTools Read Grep Glob` — no edits, no shell.
-`claude-companion review` passes `--bare --allowedTools Read Grep Glob Bash(git diff:*) Bash(git log:*) Bash(git status:*) Bash(git show:*)` — Claude can inspect git history but cannot modify files, run arbitrary shell, or commit.
+`claude-companion ask` passes `--tools Read,Grep,Glob` (restricts available tools) and `--allowedTools Read Grep Glob` (bypasses permission prompts for those tools). `--allowedTools` alone does not prevent Claude from using other tools; `--tools` is what enforces the restriction.
 
-There is no opt-in flag to loosen this — this plugin is the read-only shell-out version on purpose.
+`claude-companion review` passes `--tools Read,Grep,Glob,Bash` with `--allowedTools` scoped to `git diff/log/status/show` patterns, plus `--disallowedTools Edit Write MultiEdit` as a belt-and-suspenders guard against file writes.
+
+There is no opt-in flag to loosen this — this plugin is the read-only delegation bridge on purpose.
 
 ## License
 
