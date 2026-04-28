@@ -9,7 +9,16 @@ const TMP = path.join(os.tmpdir(), `claude-plugin-test-${process.pid}`);
 process.env.HOME = TMP; // redirect os.homedir() for this process
 
 // Dynamically import after setting HOME so the module picks up the temp dir
-const { upsertJob, readJob, pruneJobs, JOBS_DIR, redactString } = await import("../scripts/lib/state.mjs");
+const {
+  DEFAULT_RETENTION_DAYS,
+  JOBS_DIR,
+  autoPruneByEnv,
+  pruneJobs,
+  readJob,
+  redactString,
+  redactionEnabled,
+  upsertJob,
+} = await import("../scripts/lib/state.mjs");
 
 before(() => {
   fs.mkdirSync(JOBS_DIR, { recursive: true });
@@ -107,4 +116,148 @@ test("pruneJobs --all: removes done and failed jobs", () => {
   assert.ok(count >= 2);
   assert.equal(readJob("prune03"), null);
   assert.equal(readJob("prune04"), null);
+});
+
+test("pruneJobs olderThanMs: keeps recent, removes old", () => {
+  // Recent: createdAt = now → must survive.
+  upsertJob({ id: "age01", kind: "ask", status: "done" });
+  // Old: backdate createdAt by 10 days.
+  upsertJob({ id: "age02", kind: "ask", status: "done" });
+  const oldRec = readJob("age02");
+  oldRec.createdAt = new Date(Date.now() - 10 * 86400000).toISOString();
+  fs.writeFileSync(path.join(JOBS_DIR, "age02.json"), JSON.stringify(oldRec));
+
+  const removed = pruneJobs({ olderThanMs: 5 * 86400000 });
+  assert.ok(removed >= 1);
+  assert.ok(readJob("age01") !== null);
+  assert.equal(readJob("age02"), null);
+});
+
+test("pruneJobs olderThanMs: never removes running jobs even if old", () => {
+  upsertJob({ id: "age03", kind: "ask", status: "running" });
+  const rec = readJob("age03");
+  rec.createdAt = new Date(Date.now() - 100 * 86400000).toISOString();
+  fs.writeFileSync(path.join(JOBS_DIR, "age03.json"), JSON.stringify(rec));
+
+  pruneJobs({ olderThanMs: 1 });
+  assert.ok(readJob("age03") !== null);
+});
+
+// redactString — per-pattern coverage
+
+test("redactString: scrubs AWS access key", () => {
+  const out = redactString("AKIAIOSFODNN7EXAMPLE in env");
+  assert.match(out, /\[REDACTED\]/);
+  assert.doesNotMatch(out, /AKIAIOSFODNN7EXAMPLE/);
+});
+
+test("redactString: scrubs PEM private key block", () => {
+  const pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIBOwIBAAJBA...\n-----END RSA PRIVATE KEY-----";
+  const out = redactString(`leak=${pem}`);
+  assert.match(out, /\[REDACTED\]/);
+  assert.doesNotMatch(out, /BEGIN RSA PRIVATE KEY/);
+});
+
+test("redactString: scrubs gho_ and ghs_ tokens", () => {
+  const gho = "gho_" + "c".repeat(36);
+  const ghs = "ghs_" + "d".repeat(36);
+  const out = redactString(`a=${gho} b=${ghs}`);
+  assert.doesNotMatch(out, new RegExp(gho));
+  assert.doesNotMatch(out, new RegExp(ghs));
+});
+
+test("redactString: handles non-string input", () => {
+  assert.equal(redactString(null), null);
+  assert.equal(redactString(undefined), undefined);
+  assert.equal(redactString(123), 123);
+});
+
+// redaction default — must be ON unless explicitly disabled.
+
+test("redactionEnabled: default ON when env unset", () => {
+  const prev = process.env.CLAUDE_COMPANION_REDACT;
+  delete process.env.CLAUDE_COMPANION_REDACT;
+  try {
+    assert.equal(redactionEnabled(), true);
+  } finally {
+    if (prev !== undefined) process.env.CLAUDE_COMPANION_REDACT = prev;
+  }
+});
+
+test("redactionEnabled: OFF when set to 0/off/false/no", () => {
+  const prev = process.env.CLAUDE_COMPANION_REDACT;
+  try {
+    for (const v of ["0", "off", "OFF", "false", "no"]) {
+      process.env.CLAUDE_COMPANION_REDACT = v;
+      assert.equal(redactionEnabled(), false, `expected OFF for ${v}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_COMPANION_REDACT;
+    else process.env.CLAUDE_COMPANION_REDACT = prev;
+  }
+});
+
+test("upsertJob: redacts by default (no env var set)", () => {
+  const prev = process.env.CLAUDE_COMPANION_REDACT;
+  delete process.env.CLAUDE_COMPANION_REDACT;
+  try {
+    const ghp = "ghp_" + "e".repeat(36);
+    upsertJob({ id: "redact-default", kind: "ask", status: "done", stdout: `leak=${ghp}` });
+    const j = readJob("redact-default");
+    assert.match(j.stdout, /\[REDACTED\]/);
+    assert.doesNotMatch(j.stdout, new RegExp(ghp));
+  } finally {
+    if (prev !== undefined) process.env.CLAUDE_COMPANION_REDACT = prev;
+  }
+});
+
+test("upsertJob: stores raw stdout when CLAUDE_COMPANION_REDACT=0", () => {
+  const prev = process.env.CLAUDE_COMPANION_REDACT;
+  process.env.CLAUDE_COMPANION_REDACT = "0";
+  try {
+    const ghp = "ghp_" + "f".repeat(36);
+    upsertJob({ id: "redact-off", kind: "ask", status: "done", stdout: `leak=${ghp}` });
+    const j = readJob("redact-off");
+    assert.match(j.stdout, new RegExp(ghp));
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_COMPANION_REDACT;
+    else process.env.CLAUDE_COMPANION_REDACT = prev;
+  }
+});
+
+// Default retention — autoPruneByEnv with no env should clean old finished jobs.
+
+test("autoPruneByEnv: defaults to ~30 days when env unset", () => {
+  assert.equal(DEFAULT_RETENTION_DAYS, 30);
+  const prev = process.env.CLAUDE_COMPANION_RETENTION_DAYS;
+  delete process.env.CLAUDE_COMPANION_RETENTION_DAYS;
+  try {
+    upsertJob({ id: "ret01", kind: "ask", status: "done" });
+    const rec = readJob("ret01");
+    rec.createdAt = new Date(Date.now() - 60 * 86400000).toISOString();
+    fs.writeFileSync(path.join(JOBS_DIR, "ret01.json"), JSON.stringify(rec));
+
+    autoPruneByEnv();
+    assert.equal(readJob("ret01"), null);
+  } finally {
+    if (prev !== undefined) process.env.CLAUDE_COMPANION_RETENTION_DAYS = prev;
+  }
+});
+
+test("autoPruneByEnv: CLAUDE_COMPANION_RETENTION_DAYS=0 disables pruning", () => {
+  const prev = process.env.CLAUDE_COMPANION_RETENTION_DAYS;
+  process.env.CLAUDE_COMPANION_RETENTION_DAYS = "0";
+  try {
+    upsertJob({ id: "ret02", kind: "ask", status: "done" });
+    const rec = readJob("ret02");
+    rec.createdAt = new Date(Date.now() - 365 * 86400000).toISOString();
+    fs.writeFileSync(path.join(JOBS_DIR, "ret02.json"), JSON.stringify(rec));
+
+    const removed = autoPruneByEnv();
+    assert.equal(removed, 0);
+    assert.ok(readJob("ret02") !== null);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_COMPANION_RETENTION_DAYS;
+    else process.env.CLAUDE_COMPANION_RETENTION_DAYS = prev;
+  }
 });

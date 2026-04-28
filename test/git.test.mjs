@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateBase, ensureGitRepo } from "../scripts/lib/git.mjs";
+import { validateBase, ensureGitRepo, gatherReviewDiffs } from "../scripts/lib/git.mjs";
 
 // The test runner itself runs inside the repo, so process.cwd() is a valid git root.
 const CWD = process.cwd();
@@ -45,4 +45,41 @@ test("validateBase: accepts feature/branch style names", () => {
 test("validateBase: accepts origin/main", () => {
   const result = validateBase(CWD, "origin/main");
   assert.ok(typeof result === "boolean");
+});
+
+test("validateBase: rejects whitespace", () => {
+  assert.equal(validateBase(CWD, "main other"), false);
+});
+
+test("validateBase: rejects redirection", () => {
+  assert.equal(validateBase(CWD, "main>out"), false);
+});
+
+test("validateBase: rejects ampersand chaining", () => {
+  assert.equal(validateBase(CWD, "main&&id"), false);
+});
+
+test("validateBase: rejects non-string input", () => {
+  assert.equal(validateBase(CWD, null), false);
+  assert.equal(validateBase(CWD, undefined), false);
+  assert.equal(validateBase(CWD, 123), false);
+});
+
+test("validateBase: rejects unknown ref via rev-parse", () => {
+  // Charset passes but ref does not exist — rev-parse must fail.
+  assert.equal(validateBase(CWD, "definitely-not-a-real-ref-xyzzy"), false);
+});
+
+test("gatherReviewDiffs: returns the expected shape", () => {
+  const out = gatherReviewDiffs(CWD, "HEAD");
+  for (const k of ["status", "diffStat", "diff", "diffCached", "diffBase"]) {
+    assert.equal(typeof out[k], "string");
+  }
+});
+
+test("gatherReviewDiffs: invalid base does not throw", () => {
+  // base is interpolated into a single argv slot; bad ref → empty string,
+  // never an exception or shell execution.
+  const out = gatherReviewDiffs(CWD, "no-such-ref-zzzzz");
+  assert.equal(typeof out.diffBase, "string");
 });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, spawnSync, execSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -7,8 +7,14 @@ import { fileURLToPath } from "node:url";
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
 import { appendFile, readStdin } from "./lib/fs.mjs";
 import { buildAskArgv, buildReviewArgv, spawnClaude } from "./lib/claude.mjs";
-import { ensureGitRepo, resolveDefaultBase, validateBase } from "./lib/git.mjs";
 import {
+  ensureGitRepo,
+  gatherReviewDiffs,
+  resolveDefaultBase,
+  validateBase,
+} from "./lib/git.mjs";
+import {
+  DEFAULT_RETENTION_DAYS,
   ROOT,
   autoPruneByEnv,
   generateJobId,
@@ -18,6 +24,7 @@ import {
   listJobsNewestFirst,
   pruneJobs,
   readJob,
+  redactionEnabled,
   redactString,
   upsertJob,
 } from "./lib/state.mjs";
@@ -25,9 +32,21 @@ import { renderJob, renderSetup, renderStatusTable } from "./lib/render.mjs";
 
 const COMPANION = fileURLToPath(import.meta.url);
 
-// Live console output stays raw; on-disk log is redacted when env says so.
-const REDACT_LOG = () => process.env.CLAUDE_COMPANION_REDACT === "1";
-const logChunk = (s) => (REDACT_LOG() ? redactString(s) : s);
+// Per-section cap when embedding diffs in the review prompt. Real PRs can
+// produce huge diffs; cap each section so the prompt stays manageable.
+const REVIEW_SECTION_CAP = 256 * 1024;
+function capDiffSection(s, label) {
+  if (!s) return "";
+  if (s.length <= REVIEW_SECTION_CAP) return s;
+  return (
+    s.slice(0, REVIEW_SECTION_CAP) +
+    `\n\n[${label} truncated at ${REVIEW_SECTION_CAP} bytes]\n`
+  );
+}
+
+// Live console output stays raw; on-disk log is redacted by default
+// (disable with CLAUDE_COMPANION_REDACT=0).
+const logChunk = (s) => (redactionEnabled() ? redactString(s) : s);
 
 function printUsage() {
   process.stdout.write(
@@ -138,18 +157,30 @@ async function cmdReview(tokens) {
   const focusFromFlag = typeof flags.get("focus") === "string" ? flags.get("focus") : "";
   const focus = (focusFromFlag || positional.join(" ")).trim();
   const focusLine = focus ? `\n\nFocus: ${focus}` : "";
+
+  // Companion gathers the diff via execFileSync (no shell, no Bash for Claude).
+  // Claude reviews the embedded text and uses Read/Grep/Glob to look up
+  // surrounding code as needed.
+  const diffs = gatherReviewDiffs(cwd, base);
+  const sections = [
+    ["git status --short", diffs.status || "(clean)"],
+    ["git diff --stat", diffs.diffStat || "(empty)"],
+    ["git diff (unstaged)", capDiffSection(diffs.diff, "git diff") || "(empty)"],
+    ["git diff --cached (staged)", capDiffSection(diffs.diffCached, "git diff --cached") || "(empty)"],
+    [`git diff ${base}...HEAD`, capDiffSection(diffs.diffBase, "git diff base...HEAD") || "(empty)"],
+  ];
+  const diffBlock = sections
+    .map(([label, body]) => `----- ${label} -----\n${body}`)
+    .join("\n\n");
   const prompt =
     `Review the changes in this repository. ` +
-    `Run these commands in order: ` +
-    `(1) \`git status --short\`, ` +
-    `(2) \`git diff --stat\`, ` +
-    `(3) \`git diff\`, ` +
-    `(4) \`git diff --cached\`, ` +
-    `(5) \`git diff ${base}...HEAD\`. ` +
-    `Report: (1) bugs or correctness issues, (2) security concerns, ` +
+    `The diff has already been collected and is included below. ` +
+    `Use Read/Grep/Glob to look up surrounding code in the working tree as needed; ` +
+    `do not modify any files.\n\n` +
+    diffBlock +
+    `\n\nReport: (1) bugs or correctness issues, (2) security concerns, ` +
     `(3) test coverage gaps, (4) anything surprising. ` +
-    `Be concrete — quote file paths and line numbers. ` +
-    `Do NOT modify any files.${focusLine}`;
+    `Be concrete — quote file paths and line numbers.${focusLine}`;
   const argv = buildReviewArgv({ prompt });
   if (background) {
     const id = spawnWorker("review", argv, cwd, prompt);
@@ -247,22 +278,32 @@ function cmdPrune(tokens) {
   process.stdout.write(`Pruned ${count} job(s) from ${ROOT}\n`);
 }
 
+function effectiveRetentionDays() {
+  const raw = process.env.CLAUDE_COMPANION_RETENTION_DAYS;
+  if (raw == null || raw === "") return DEFAULT_RETENTION_DAYS;
+  if (["0", "off", "false", "no"].includes(String(raw).toLowerCase())) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 function cmdSetup() {
-  const report = { stateDir: ROOT };
+  const report = {
+    stateDir: ROOT,
+    redactionEnabled: redactionEnabled(),
+    retentionDays: effectiveRetentionDays(),
+  };
+  // shell:true is required on Windows because `claude` ships as a .cmd shim;
+  // there is no untrusted input on this code path.
+  const isWin = process.platform === "win32";
+  const opts = { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: isWin };
   try {
-    report.claudeVersion = execSync("claude --version", {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    }).trim();
+    report.claudeVersion = execFileSync("claude", ["--version"], opts).trim();
     report.claudeFound = true;
   } catch {
     report.claudeFound = false;
   }
   try {
-    execSync("claude auth status", {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    execFileSync("claude", ["auth", "status"], opts);
     report.claudeAuthed = true;
   } catch {
     report.claudeAuthed = false;

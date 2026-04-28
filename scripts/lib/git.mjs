@@ -1,12 +1,16 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
-function run(cmd, cwd) {
-  return execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const BASE_OPTS = { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+// Diffs on real PRs can blow past the default 1 MiB buffer.
+const DIFF_OPTS = { ...BASE_OPTS, maxBuffer: 64 * 1024 * 1024 };
+
+function git(args, cwd, opts = BASE_OPTS) {
+  return execFileSync("git", args, { ...opts, cwd });
 }
 
 export function ensureGitRepo(cwd) {
   try {
-    run("git rev-parse --is-inside-work-tree", cwd);
+    git(["rev-parse", "--is-inside-work-tree"], cwd);
     return true;
   } catch {
     return false;
@@ -24,7 +28,7 @@ export function resolveDefaultBase(cwd) {
   ];
   for (const candidate of candidates) {
     try {
-      run(`git rev-parse --verify ${candidate}`, cwd);
+      git(["rev-parse", "--verify", candidate], cwd);
       return candidate;
     } catch {
       /* try next */
@@ -33,23 +37,39 @@ export function resolveDefaultBase(cwd) {
   return "main";
 }
 
-// Allow only safe git ref characters to prevent shell injection via --base
+// Belt-and-suspenders: refs are passed as argv to execFileSync (no shell), so
+// shell-injection chars cannot reach a shell. We still gate on a safe ref
+// charset so a malformed --base fails fast rather than triggering git errors.
 const SAFE_REF_RE = /^[\w/.\-@^~{}[\]]+$/;
 
 export function validateBase(cwd, base) {
-  if (!SAFE_REF_RE.test(base)) return false;
+  if (typeof base !== "string" || !SAFE_REF_RE.test(base)) return false;
   try {
-    run(`git rev-parse --verify ${base}`, cwd);
+    git(["rev-parse", "--verify", base], cwd);
     return true;
   } catch {
     return false;
   }
 }
 
-export function diffShortstat(cwd, base) {
+function safeGit(args, cwd, opts = DIFF_OPTS) {
   try {
-    return run(`git diff --shortstat ${base}...HEAD`, cwd).trim();
+    return git(args, cwd, opts);
   } catch {
     return "";
   }
+}
+
+export function diffShortstat(cwd, base) {
+  return safeGit(["diff", "--shortstat", `${base}...HEAD`], cwd).trim();
+}
+
+export function gatherReviewDiffs(cwd, base) {
+  return {
+    status: safeGit(["status", "--short"], cwd),
+    diffStat: safeGit(["diff", "--stat"], cwd),
+    diff: safeGit(["diff"], cwd),
+    diffCached: safeGit(["diff", "--cached"], cwd),
+    diffBase: safeGit(["diff", `${base}...HEAD`], cwd),
+  };
 }

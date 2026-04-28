@@ -35,8 +35,16 @@ export function readJob(id) {
   return readJson(jobFile(id));
 }
 
-// Best-effort secret redaction. Off by default; enable with CLAUDE_COMPANION_REDACT=1.
+// Best-effort secret redaction. ON by default; disable with
+// CLAUDE_COMPANION_REDACT=0 (also accepts off/false/no).
 // Applied at the persistence boundary so the on-disk job record never sees raw secrets.
+const REDACT_OFF = new Set(["0", "off", "false", "no"]);
+export function redactionEnabled() {
+  const v = process.env.CLAUDE_COMPANION_REDACT;
+  if (v == null || v === "") return true;
+  return !REDACT_OFF.has(String(v).toLowerCase());
+}
+
 const REDACT_PATTERNS = [
   /(?:sk|pk|rk)-[A-Za-z0-9_\-]{16,}/g,            // OpenAI/Stripe-style keys
   /sk-ant-[A-Za-z0-9_\-]{16,}/g,                  // Anthropic
@@ -54,7 +62,7 @@ export function redactString(s) {
   return out;
 }
 function redactPartial(partial) {
-  if (process.env.CLAUDE_COMPANION_REDACT !== "1") return partial;
+  if (!redactionEnabled()) return partial;
   const out = { ...partial };
   for (const k of ["stdout", "stderr", "summary", "prompt"]) {
     if (typeof out[k] === "string") out[k] = redactString(out[k]);
@@ -82,13 +90,24 @@ export function latestJob() {
   return listJobsNewestFirst()[0] ?? null;
 }
 
-// CLAUDE_COMPANION_RETENTION_DAYS=N → auto-prune anything older than N days.
+// Auto-prune jobs older than N days at the start of every command.
+// Default 30 days. Set CLAUDE_COMPANION_RETENTION_DAYS=N to override or
+// CLAUDE_COMPANION_RETENTION_DAYS=0 (off/false/no) to disable.
 // Best-effort: errors are swallowed so a bad env value can never break a command.
+export const DEFAULT_RETENTION_DAYS = 30;
+const RETENTION_OFF = new Set(["0", "off", "false", "no"]);
 export function autoPruneByEnv() {
   const raw = process.env.CLAUDE_COMPANION_RETENTION_DAYS;
-  if (!raw) return 0;
-  const days = Number(raw);
-  if (!Number.isFinite(days) || days <= 0) return 0;
+  let days;
+  if (raw == null || raw === "") {
+    days = DEFAULT_RETENTION_DAYS;
+  } else if (RETENTION_OFF.has(String(raw).toLowerCase())) {
+    return 0;
+  } else {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    days = parsed;
+  }
   try {
     return pruneJobs({ olderThanMs: days * 86400000 });
   } catch {

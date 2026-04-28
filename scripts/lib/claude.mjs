@@ -1,17 +1,6 @@
 import { spawn } from "node:child_process";
 
 export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
-export const REVIEW_TOOLS = [
-  "Read",
-  "Grep",
-  "Glob",
-  "Bash(git diff:*)",
-  "Bash(git log:*)",
-  "Bash(git status:*)",
-  "Bash(git show:*)",
-];
-
-const REVIEW_TOOL_NAMES = ["Read", "Grep", "Glob", "Bash"];
 
 export function buildAskArgv({
   prompt,
@@ -26,11 +15,14 @@ export function buildAskArgv({
   return argv;
 }
 
+// Review uses the same read-only allowlist as ask. The companion gathers the
+// git diff itself (via execFileSync) and embeds it in the prompt, so Claude
+// never needs Bash. --disallowedTools is kept as a defense-in-depth guard.
 export function buildReviewArgv({ prompt, permissionMode = "dontAsk" }) {
   const argv = ["--output-format", "text", "--permission-mode", permissionMode];
-  argv.push("--tools", REVIEW_TOOL_NAMES.join(","));
-  argv.push("--allowedTools", ...REVIEW_TOOLS);
-  argv.push("--disallowedTools", "Edit", "Write", "MultiEdit");
+  argv.push("--tools", READ_ONLY_TOOLS.join(","));
+  argv.push("--allowedTools", ...READ_ONLY_TOOLS);
+  argv.push("--disallowedTools", "Edit", "Write", "MultiEdit", "Bash");
   argv.push("-p", prompt);
   return argv;
 }

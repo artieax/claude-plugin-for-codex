@@ -48,6 +48,9 @@ export function renderSetup(report) {
       report.claudeAuthed ? "" : "run `claude auth login`",
     ),
     `state dir: ${report.stateDir}`,
+    `redaction: ${report.redactionEnabled ? "ON (default)" : "OFF (CLAUDE_COMPANION_REDACT)"}`,
+    `retention: ${report.retentionDays > 0 ? `${report.retentionDays}d (auto-prune)` : "OFF"}`,
+    "note: job logs may contain repository contents and any secrets present in stdout/stderr.",
   ];
   return lines.join("\n") + "\n";
 }

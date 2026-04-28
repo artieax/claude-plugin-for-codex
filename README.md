@@ -116,7 +116,12 @@ claude-companion status
 
 Both are plain files; delete the directory to wipe history.
 
-**Security note:** Job history is stored as plain JSON/log files under `~/.claude-plugin-for-codex/jobs/`. Outputs may include repository paths, code snippets, stack traces, or secrets from your working tree. Use `claude-companion prune` to clean up:
+**Security note:** Job history is stored as plain JSON/log files under `~/.claude-plugin-for-codex/jobs/`. Outputs may include repository paths, code snippets, or stack traces from your working tree. To reduce blast radius, the companion ships with two defaults on:
+
+- **Best-effort redaction** of common secret shapes (API keys, JWTs, PEMs) is applied at the persistence boundary, so on-disk records never see raw values. Disable with `CLAUDE_COMPANION_REDACT=0`.
+- **30-day auto-prune** runs on every command. Override with `CLAUDE_COMPANION_RETENTION_DAYS=N`, or disable with `CLAUDE_COMPANION_RETENTION_DAYS=0`.
+
+You can also prune manually:
 
 ```sh
 claude-companion prune --older-than 7d
@@ -128,7 +133,8 @@ claude-companion prune --all
 Both `ask` and `review` invoke Claude with `--permission-mode dontAsk` so the runtime never falls through to an interactive approval prompt for an untrusted tool. Layered on top of that:
 
 - `claude-companion ask` passes `--tools Read,Grep,Glob` (restricts available tools) and `--allowedTools Read Grep Glob` (bypasses permission prompts for those tools).
-- `claude-companion review` passes `--tools Read,Grep,Glob,Bash` with `--allowedTools` scoped to `git diff/log/status/show` patterns, plus `--disallowedTools Edit Write MultiEdit` as a belt-and-suspenders guard against file writes.
+- `claude-companion review` is also `Read,Grep,Glob` only. The companion gathers `git status` / `git diff` / `git diff --cached` / `git diff <base>...HEAD` itself via `execFileSync` (no shell) and embeds the result in the prompt; Claude never invokes `Bash`. `--disallowedTools Edit Write MultiEdit Bash` is set as defense in depth.
+- `--base <ref>` is gated by a safe-ref regex *and* is only ever passed to `git` as an argv slot — there is no shell interpolation anywhere in the companion.
 
 There is no opt-in flag to loosen this — this plugin is the read-only delegation bridge on purpose.
 
@@ -137,8 +143,8 @@ There is no opt-in flag to loosen this — this plugin is the read-only delegati
 | Variable                            | Effect                                                                                |
 | ----------------------------------- | ------------------------------------------------------------------------------------- |
 | `CLAUDE_COMPANION_STATE_DIR`        | Override the state directory (default `~/.claude-plugin-for-codex`).                  |
-| `CLAUDE_COMPANION_RETENTION_DAYS=N` | Auto-prune finished jobs older than N days at the start of every command.             |
-| `CLAUDE_COMPANION_REDACT=1`         | Best-effort redaction of common secret shapes (API keys, JWTs, PEMs) in stored job records and log files. Live stdout is not redacted. |
+| `CLAUDE_COMPANION_RETENTION_DAYS=N` | Auto-prune finished jobs older than N days at the start of every command. **Default: 30.** Set to `0` (or `off`/`false`/`no`) to disable. |
+| `CLAUDE_COMPANION_REDACT=0`         | Disable best-effort redaction of common secret shapes (API keys, JWTs, PEMs) in stored job records and log files. **Default: ON.** Live stdout is never redacted. |
 
 ## License
 
