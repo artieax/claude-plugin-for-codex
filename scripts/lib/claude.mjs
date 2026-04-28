@@ -26,8 +26,8 @@ export function buildAskArgv({
   return argv;
 }
 
-export function buildReviewArgv({ prompt }) {
-  const argv = ["--output-format", "text"];
+export function buildReviewArgv({ prompt, permissionMode = "dontAsk" }) {
+  const argv = ["--output-format", "text", "--permission-mode", permissionMode];
   argv.push("--tools", REVIEW_TOOL_NAMES.join(","));
   argv.push("--allowedTools", ...REVIEW_TOOLS);
   argv.push("--disallowedTools", "Edit", "Write", "MultiEdit");

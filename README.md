@@ -125,11 +125,20 @@ claude-companion prune --all
 
 ## Safety posture
 
-`claude-companion ask` passes `--tools Read,Grep,Glob` (restricts available tools) and `--allowedTools Read Grep Glob` (bypasses permission prompts for those tools). `--allowedTools` alone does not prevent Claude from using other tools; `--tools` is what enforces the restriction.
+Both `ask` and `review` invoke Claude with `--permission-mode dontAsk` so the runtime never falls through to an interactive approval prompt for an untrusted tool. Layered on top of that:
 
-`claude-companion review` passes `--tools Read,Grep,Glob,Bash` with `--allowedTools` scoped to `git diff/log/status/show` patterns, plus `--disallowedTools Edit Write MultiEdit` as a belt-and-suspenders guard against file writes.
+- `claude-companion ask` passes `--tools Read,Grep,Glob` (restricts available tools) and `--allowedTools Read Grep Glob` (bypasses permission prompts for those tools).
+- `claude-companion review` passes `--tools Read,Grep,Glob,Bash` with `--allowedTools` scoped to `git diff/log/status/show` patterns, plus `--disallowedTools Edit Write MultiEdit` as a belt-and-suspenders guard against file writes.
 
 There is no opt-in flag to loosen this — this plugin is the read-only delegation bridge on purpose.
+
+## Configuration (env vars)
+
+| Variable                            | Effect                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------- |
+| `CLAUDE_COMPANION_STATE_DIR`        | Override the state directory (default `~/.claude-plugin-for-codex`).                  |
+| `CLAUDE_COMPANION_RETENTION_DAYS=N` | Auto-prune finished jobs older than N days at the start of every command.             |
+| `CLAUDE_COMPANION_REDACT=1`         | Best-effort redaction of common secret shapes (API keys, JWTs, PEMs) in stored job records and log files. Live stdout is not redacted. |
 
 ## License
 

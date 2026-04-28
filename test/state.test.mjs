@@ -9,7 +9,7 @@ const TMP = path.join(os.tmpdir(), `claude-plugin-test-${process.pid}`);
 process.env.HOME = TMP; // redirect os.homedir() for this process
 
 // Dynamically import after setting HOME so the module picks up the temp dir
-const { upsertJob, readJob, pruneJobs, JOBS_DIR } = await import("../scripts/lib/state.mjs");
+const { upsertJob, readJob, pruneJobs, JOBS_DIR, redactString } = await import("../scripts/lib/state.mjs");
 
 before(() => {
   fs.mkdirSync(JOBS_DIR, { recursive: true });
@@ -65,6 +65,39 @@ test("pruneJobs: skips running and pending jobs", () => {
   assert.ok(readJob("prune02") !== null);
   // count reflects only jobs that were actually deleted
   assert.equal(typeof count, "number");
+});
+
+test("redactString: scrubs OpenAI/Anthropic-style keys", () => {
+  const out = redactString("token=sk-ant-1234567890abcdefghij next");
+  assert.match(out, /\[REDACTED\]/);
+  assert.doesNotMatch(out, /sk-ant-1234567890abcdefghij/);
+});
+
+test("redactString: scrubs GitHub PAT and JWT", () => {
+  const ghp = "ghp_" + "a".repeat(36);
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.signature_part_here_x9z";
+  const out = redactString(`pat=${ghp} jwt=${jwt}`);
+  assert.doesNotMatch(out, new RegExp(ghp));
+  assert.doesNotMatch(out, /signature_part_here/);
+});
+
+test("redactString: returns input unchanged when no patterns match", () => {
+  assert.equal(redactString("plain content with no secrets"), "plain content with no secrets");
+});
+
+test("upsertJob: redacts stdout when CLAUDE_COMPANION_REDACT=1", () => {
+  const prev = process.env.CLAUDE_COMPANION_REDACT;
+  process.env.CLAUDE_COMPANION_REDACT = "1";
+  try {
+    const ghp = "ghp_" + "b".repeat(36);
+    upsertJob({ id: "redact01", kind: "ask", status: "done", stdout: `leak=${ghp}` });
+    const j = readJob("redact01");
+    assert.match(j.stdout, /\[REDACTED\]/);
+    assert.doesNotMatch(j.stdout, new RegExp(ghp));
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_COMPANION_REDACT;
+    else process.env.CLAUDE_COMPANION_REDACT = prev;
+  }
 });
 
 test("pruneJobs --all: removes done and failed jobs", () => {

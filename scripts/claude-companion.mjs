@@ -10,6 +10,7 @@ import { buildAskArgv, buildReviewArgv, spawnClaude } from "./lib/claude.mjs";
 import { ensureGitRepo, resolveDefaultBase, validateBase } from "./lib/git.mjs";
 import {
   ROOT,
+  autoPruneByEnv,
   generateJobId,
   jobFile,
   jobLog,
@@ -17,11 +18,16 @@ import {
   listJobsNewestFirst,
   pruneJobs,
   readJob,
+  redactString,
   upsertJob,
 } from "./lib/state.mjs";
 import { renderJob, renderSetup, renderStatusTable } from "./lib/render.mjs";
 
 const COMPANION = fileURLToPath(import.meta.url);
+
+// Live console output stays raw; on-disk log is redacted when env says so.
+const REDACT_LOG = () => process.env.CLAUDE_COMPANION_REDACT === "1";
+const logChunk = (s) => (REDACT_LOG() ? redactString(s) : s);
 
 function printUsage() {
   process.stdout.write(
@@ -53,11 +59,11 @@ async function runInline(kind, argv, cwd, prompt) {
     cwd,
     onStdout: (s) => {
       process.stdout.write(s);
-      appendFile(jobLog(id), s);
+      appendFile(jobLog(id), logChunk(s));
     },
     onStderr: (s) => {
       process.stderr.write(s);
-      appendFile(jobLog(id), s);
+      appendFile(jobLog(id), logChunk(s));
     },
   });
   const { exitCode, stdout, stderr } = await done;
@@ -272,8 +278,8 @@ async function cmdWorker(tokens) {
   upsertJob({ id, status: "running", pid: process.pid });
   const { child, done } = spawnClaude(job.argv, {
     cwd: job.cwd,
-    onStdout: (s) => appendFile(jobLog(id), s),
-    onStderr: (s) => appendFile(jobLog(id), s),
+    onStdout: (s) => appendFile(jobLog(id), logChunk(s)),
+    onStderr: (s) => appendFile(jobLog(id), logChunk(s)),
   });
   // Store the Claude child PID so cancel can kill it on Windows too
   if (child.pid) upsertJob({ id, claudePid: child.pid });
@@ -314,6 +320,9 @@ async function main() {
     printUsage();
     return;
   }
+  // Honor CLAUDE_COMPANION_RETENTION_DAYS for every invocation except __worker
+  // (__worker writes back to a job that the parent expects to still exist).
+  if (verb !== "__worker") autoPruneByEnv();
   const cmd = DISPATCH[verb];
   if (!cmd) {
     process.stderr.write(`Unknown verb: ${verb}\n`);
