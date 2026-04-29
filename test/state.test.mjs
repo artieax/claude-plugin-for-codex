@@ -12,7 +12,12 @@ process.env.HOME = TMP; // redirect os.homedir() for this process
 const {
   DEFAULT_RETENTION_DAYS,
   JOBS_DIR,
+  assertJobId,
   autoPruneByEnv,
+  generateJobId,
+  isValidJobId,
+  jobFile,
+  jobLog,
   pruneJobs,
   readJob,
   redactString,
@@ -29,49 +34,93 @@ after(() => {
 });
 
 test("upsertJob: creates a new job", () => {
-  const job = upsertJob({ id: "test01", kind: "ask", status: "running" });
-  assert.equal(job.id, "test01");
+  const job = upsertJob({ id: "100000000001", kind: "ask", status: "running" });
+  assert.equal(job.id, "100000000001");
   assert.equal(job.status, "running");
   assert.ok(job.createdAt);
 });
 
 test("upsertJob: merges into existing job", () => {
-  upsertJob({ id: "test02", kind: "review", status: "running" });
-  const updated = upsertJob({ id: "test02", status: "done", exitCode: 0 });
+  upsertJob({ id: "100000000002", kind: "review", status: "running" });
+  const updated = upsertJob({ id: "100000000002", status: "done", exitCode: 0 });
   assert.equal(updated.kind, "review"); // original field preserved
   assert.equal(updated.status, "done");
   assert.equal(updated.exitCode, 0);
 });
 
 test("readJob: returns null for unknown id", () => {
+  // 'nope' fails the format check; readJob returns null instead of throwing.
   assert.equal(readJob("nope"), null);
+});
+
+test("readJob: returns null for well-formed but unused id", () => {
+  // 12 hex chars passes the format check but the file does not exist.
+  assert.equal(readJob("0123456789ab"), null);
+});
+
+// Job-id format invariant — readJob/jobFile/jobLog must only accept
+// `[a-f0-9]{12}` so user input cannot escape JOBS_DIR via path traversal.
+
+test("isValidJobId: accepts 12 lowercase hex chars", () => {
+  assert.equal(isValidJobId("0123456789ab"), true);
+  assert.equal(isValidJobId(generateJobId()), true);
+});
+
+test("isValidJobId: rejects bad shapes", () => {
+  for (const bad of [
+    "",
+    null,
+    undefined,
+    123,
+    "ABC123ABC123",      // uppercase
+    "0123456789a",       // too short
+    "0123456789abc",     // too long
+    "g123456789ab",      // non-hex
+    "../foo",            // path traversal
+    "../../../etc/pwd",  // path traversal
+    "0123456789ab.json", // extension included
+    "0123456789ab/x",    // slash
+  ]) {
+    assert.equal(isValidJobId(bad), false, `expected false for ${JSON.stringify(bad)}`);
+  }
+});
+
+test("assertJobId: throws on bad ids", () => {
+  for (const bad of ["", "../foo", "ABCDEF123456", "g123456789ab"]) {
+    assert.throws(() => assertJobId(bad), /invalid job id/);
+  }
+});
+
+test("jobFile / jobLog reject path traversal", () => {
+  assert.throws(() => jobFile("../foo"), /invalid job id/);
+  assert.throws(() => jobLog("../../etc/passwd"), /invalid job id/);
 });
 
 // Simulate the cancel/worker race: after cancel sets status='cancelled',
 // worker should NOT overwrite it.  The guard lives in cmdWorker (not upsertJob),
 // so we test the expected contract: read job, check status, skip upsertJob.
 test("cancelled job must not be overwritten (guard contract)", () => {
-  upsertJob({ id: "test03", kind: "ask", status: "running" });
+  upsertJob({ id: "100000000003", kind: "ask", status: "running" });
   // cancel sets status to cancelled
-  upsertJob({ id: "test03", status: "cancelled", endedAt: new Date().toISOString(), pid: null });
+  upsertJob({ id: "100000000003", status: "cancelled", endedAt: new Date().toISOString(), pid: null });
 
   // worker checks status before final write — simulate that guard
-  const current = readJob("test03");
+  const current = readJob("100000000003");
   if (current?.status !== "cancelled") {
-    upsertJob({ id: "test03", status: "failed", exitCode: 1 });
+    upsertJob({ id: "100000000003", status: "failed", exitCode: 1 });
   }
 
-  const final = readJob("test03");
+  const final = readJob("100000000003");
   assert.equal(final.status, "cancelled"); // must still be cancelled
 });
 
 test("pruneJobs: skips running and pending jobs", () => {
-  upsertJob({ id: "prune01", kind: "ask", status: "running" });
-  upsertJob({ id: "prune02", kind: "ask", status: "pending" });
+  upsertJob({ id: "200000000001", kind: "ask", status: "running" });
+  upsertJob({ id: "200000000002", kind: "ask", status: "pending" });
   const count = pruneJobs({ all: true });
   // prune01 and prune02 should NOT be pruned
-  assert.ok(readJob("prune01") !== null);
-  assert.ok(readJob("prune02") !== null);
+  assert.ok(readJob("200000000001") !== null);
+  assert.ok(readJob("200000000002") !== null);
   // count reflects only jobs that were actually deleted
   assert.equal(typeof count, "number");
 });
@@ -99,8 +148,8 @@ test("upsertJob: redacts stdout when CLAUDE_COMPANION_REDACT=1", () => {
   process.env.CLAUDE_COMPANION_REDACT = "1";
   try {
     const ghp = "ghp_" + "b".repeat(36);
-    upsertJob({ id: "redact01", kind: "ask", status: "done", stdout: `leak=${ghp}` });
-    const j = readJob("redact01");
+    upsertJob({ id: "400000000001", kind: "ask", status: "done", stdout: `leak=${ghp}` });
+    const j = readJob("400000000001");
     assert.match(j.stdout, /\[REDACTED\]/);
     assert.doesNotMatch(j.stdout, new RegExp(ghp));
   } finally {
@@ -110,37 +159,37 @@ test("upsertJob: redacts stdout when CLAUDE_COMPANION_REDACT=1", () => {
 });
 
 test("pruneJobs --all: removes done and failed jobs", () => {
-  upsertJob({ id: "prune03", kind: "ask", status: "done" });
-  upsertJob({ id: "prune04", kind: "ask", status: "failed" });
+  upsertJob({ id: "200000000003", kind: "ask", status: "done" });
+  upsertJob({ id: "200000000004", kind: "ask", status: "failed" });
   const count = pruneJobs({ all: true });
   assert.ok(count >= 2);
-  assert.equal(readJob("prune03"), null);
-  assert.equal(readJob("prune04"), null);
+  assert.equal(readJob("200000000003"), null);
+  assert.equal(readJob("200000000004"), null);
 });
 
 test("pruneJobs olderThanMs: keeps recent, removes old", () => {
   // Recent: createdAt = now → must survive.
-  upsertJob({ id: "age01", kind: "ask", status: "done" });
+  upsertJob({ id: "300000000001", kind: "ask", status: "done" });
   // Old: backdate createdAt by 10 days.
-  upsertJob({ id: "age02", kind: "ask", status: "done" });
-  const oldRec = readJob("age02");
+  upsertJob({ id: "300000000002", kind: "ask", status: "done" });
+  const oldRec = readJob("300000000002");
   oldRec.createdAt = new Date(Date.now() - 10 * 86400000).toISOString();
   fs.writeFileSync(path.join(JOBS_DIR, "age02.json"), JSON.stringify(oldRec));
 
   const removed = pruneJobs({ olderThanMs: 5 * 86400000 });
   assert.ok(removed >= 1);
-  assert.ok(readJob("age01") !== null);
-  assert.equal(readJob("age02"), null);
+  assert.ok(readJob("300000000001") !== null);
+  assert.equal(readJob("300000000002"), null);
 });
 
 test("pruneJobs olderThanMs: never removes running jobs even if old", () => {
-  upsertJob({ id: "age03", kind: "ask", status: "running" });
-  const rec = readJob("age03");
+  upsertJob({ id: "300000000003", kind: "ask", status: "running" });
+  const rec = readJob("300000000003");
   rec.createdAt = new Date(Date.now() - 100 * 86400000).toISOString();
   fs.writeFileSync(path.join(JOBS_DIR, "age03.json"), JSON.stringify(rec));
 
   pruneJobs({ olderThanMs: 1 });
-  assert.ok(readJob("age03") !== null);
+  assert.ok(readJob("300000000003") !== null);
 });
 
 // redactString — per-pattern coverage
@@ -202,8 +251,8 @@ test("upsertJob: redacts by default (no env var set)", () => {
   delete process.env.CLAUDE_COMPANION_REDACT;
   try {
     const ghp = "ghp_" + "e".repeat(36);
-    upsertJob({ id: "redact-default", kind: "ask", status: "done", stdout: `leak=${ghp}` });
-    const j = readJob("redact-default");
+    upsertJob({ id: "400000000002", kind: "ask", status: "done", stdout: `leak=${ghp}` });
+    const j = readJob("400000000002");
     assert.match(j.stdout, /\[REDACTED\]/);
     assert.doesNotMatch(j.stdout, new RegExp(ghp));
   } finally {
@@ -219,12 +268,12 @@ test("upsertJob: redacts argv strings as belt-and-suspenders", () => {
   try {
     const ghp = "ghp_" + "g".repeat(36);
     upsertJob({
-      id: "redact-argv",
+      id: "400000000003",
       kind: "ask",
       status: "pending",
       argv: ["-p", `leak=${ghp}`, "--allowedTools", "Read"],
     });
-    const j = readJob("redact-argv");
+    const j = readJob("400000000003");
     assert.deepEqual(j.argv.slice(2), ["--allowedTools", "Read"]);
     assert.match(j.argv[1], /\[REDACTED\]/);
     assert.doesNotMatch(j.argv[1], new RegExp(ghp));
@@ -238,8 +287,8 @@ test("upsertJob: redacts focus string", () => {
   delete process.env.CLAUDE_COMPANION_REDACT;
   try {
     const ghp = "ghp_" + "h".repeat(36);
-    upsertJob({ id: "redact-focus", kind: "review", status: "pending", focus: `audit ${ghp}` });
-    const j = readJob("redact-focus");
+    upsertJob({ id: "400000000004", kind: "review", status: "pending", focus: `audit ${ghp}` });
+    const j = readJob("400000000004");
     assert.match(j.focus, /\[REDACTED\]/);
     assert.doesNotMatch(j.focus, new RegExp(ghp));
   } finally {
@@ -252,8 +301,8 @@ test("upsertJob: stores raw stdout when CLAUDE_COMPANION_REDACT=0", () => {
   process.env.CLAUDE_COMPANION_REDACT = "0";
   try {
     const ghp = "ghp_" + "f".repeat(36);
-    upsertJob({ id: "redact-off", kind: "ask", status: "done", stdout: `leak=${ghp}` });
-    const j = readJob("redact-off");
+    upsertJob({ id: "400000000005", kind: "ask", status: "done", stdout: `leak=${ghp}` });
+    const j = readJob("400000000005");
     assert.match(j.stdout, new RegExp(ghp));
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_COMPANION_REDACT;
@@ -268,13 +317,13 @@ test("autoPruneByEnv: defaults to ~30 days when env unset", () => {
   const prev = process.env.CLAUDE_COMPANION_RETENTION_DAYS;
   delete process.env.CLAUDE_COMPANION_RETENTION_DAYS;
   try {
-    upsertJob({ id: "ret01", kind: "ask", status: "done" });
-    const rec = readJob("ret01");
+    upsertJob({ id: "500000000001", kind: "ask", status: "done" });
+    const rec = readJob("500000000001");
     rec.createdAt = new Date(Date.now() - 60 * 86400000).toISOString();
     fs.writeFileSync(path.join(JOBS_DIR, "ret01.json"), JSON.stringify(rec));
 
     autoPruneByEnv();
-    assert.equal(readJob("ret01"), null);
+    assert.equal(readJob("500000000001"), null);
   } finally {
     if (prev !== undefined) process.env.CLAUDE_COMPANION_RETENTION_DAYS = prev;
   }
@@ -284,14 +333,14 @@ test("autoPruneByEnv: CLAUDE_COMPANION_RETENTION_DAYS=0 disables pruning", () =>
   const prev = process.env.CLAUDE_COMPANION_RETENTION_DAYS;
   process.env.CLAUDE_COMPANION_RETENTION_DAYS = "0";
   try {
-    upsertJob({ id: "ret02", kind: "ask", status: "done" });
-    const rec = readJob("ret02");
+    upsertJob({ id: "500000000002", kind: "ask", status: "done" });
+    const rec = readJob("500000000002");
     rec.createdAt = new Date(Date.now() - 365 * 86400000).toISOString();
     fs.writeFileSync(path.join(JOBS_DIR, "ret02.json"), JSON.stringify(rec));
 
     const removed = autoPruneByEnv();
     assert.equal(removed, 0);
-    assert.ok(readJob("ret02") !== null);
+    assert.ok(readJob("500000000002") !== null);
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_COMPANION_RETENTION_DAYS;
     else process.env.CLAUDE_COMPANION_RETENTION_DAYS = prev;

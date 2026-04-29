@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateBase, ensureGitRepo, gatherReviewDiffs } from "../scripts/lib/git.mjs";
+import { validateBase, ensureGitRepo, gatherReviewDiffs, safeGit } from "../scripts/lib/git.mjs";
 
 // The test runner itself runs inside the repo, so process.cwd() is a valid git root.
 const CWD = process.cwd();
@@ -70,16 +70,36 @@ test("validateBase: rejects unknown ref via rev-parse", () => {
   assert.equal(validateBase(CWD, "definitely-not-a-real-ref-xyzzy"), false);
 });
 
-test("gatherReviewDiffs: returns the expected shape", () => {
+test("gatherReviewDiffs: returns {stdout, stderr, ok} per section", () => {
   const out = gatherReviewDiffs(CWD, "HEAD");
   for (const k of ["status", "diffStat", "diff", "diffCached", "diffBase"]) {
-    assert.equal(typeof out[k], "string");
+    assert.equal(typeof out[k], "object");
+    assert.equal(typeof out[k].stdout, "string");
+    assert.equal(typeof out[k].stderr, "string");
+    assert.equal(typeof out[k].ok, "boolean");
   }
 });
 
-test("gatherReviewDiffs: invalid base does not throw", () => {
-  // base is interpolated into a single argv slot; bad ref → empty string,
-  // never an exception or shell execution.
+test("gatherReviewDiffs: invalid base does not throw and reports failure via ok=false", () => {
+  // base is interpolated into a single argv slot; bad ref → ok=false with
+  // stderr populated, never an exception or shell execution.
   const out = gatherReviewDiffs(CWD, "no-such-ref-zzzzz");
-  assert.equal(typeof out.diffBase, "string");
+  assert.equal(out.diffBase.ok, false);
+  assert.ok(out.diffBase.stderr.length > 0, "expected stderr to describe the git failure");
+  assert.equal(out.diffBase.stdout, "");
+});
+
+test("safeGit: ok=true and stdout populated on success", () => {
+  const r = safeGit(["rev-parse", "--is-inside-work-tree"], CWD);
+  assert.equal(r.ok, true);
+  assert.match(r.stdout, /true/);
+  assert.equal(r.stderr, "");
+});
+
+test("safeGit: ok=false and stderr populated on failure", () => {
+  // bogus subcommand triggers a non-zero exit and a stderr message.
+  const r = safeGit(["this-is-not-a-real-git-subcommand"], CWD);
+  assert.equal(r.ok, false);
+  assert.equal(r.stdout, "");
+  assert.ok(r.stderr.length > 0);
 });

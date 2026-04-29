@@ -1,3 +1,14 @@
+// `ask` accepts free-form prompt text that often contains `--flag`-shaped tokens
+// (e.g. `what does --base do?`). parseArgs would consume those as flags and
+// drop them from the prompt, so ask uses this stricter splitter: only the
+// `--background` boolean is recognized; everything else stays in the prompt.
+export function parseAskTokens(tokens) {
+  const list = Array.isArray(tokens) ? tokens : [];
+  const background = list.includes("--background");
+  const promptTokens = list.filter((t) => t !== "--background");
+  return { background, prompt: promptTokens.join(" ").trim() };
+}
+
 // restFlags: flag names whose value consumes all remaining tokens until the next --flag.
 // Useful for --focus auth middleware (no quoting required).
 export function parseArgs(tokens, { booleanFlags = new Set(), restFlags = new Set() } = {}) {

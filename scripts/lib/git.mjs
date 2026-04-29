@@ -52,11 +52,20 @@ export function validateBase(cwd, base) {
   }
 }
 
-function safeGit(args, cwd, opts = DIFF_OPTS) {
+// safeGit returns a structured result so the caller can distinguish
+// "git ran and produced an empty diff" (ok=true, stdout="") from
+// "git failed" (ok=false, stderr=...). The review prompt embeds the
+// stderr as a warning so Claude doesn't silently treat a failure as
+// "nothing to review".
+export function safeGit(args, cwd, opts = DIFF_OPTS) {
   try {
-    return git(args, cwd, opts);
-  } catch {
-    return "";
+    return { stdout: git(args, cwd, opts), stderr: "", ok: true };
+  } catch (err) {
+    const stderr =
+      (err && err.stderr && String(err.stderr)) ||
+      (err && err.message && String(err.message)) ||
+      "git command failed";
+    return { stdout: "", stderr, ok: false };
   }
 }
 
@@ -66,7 +75,7 @@ function safeGit(args, cwd, opts = DIFF_OPTS) {
 const DIFF_HARDEN = ["--no-ext-diff", "--no-textconv"];
 
 export function diffShortstat(cwd, base) {
-  return safeGit(["diff", ...DIFF_HARDEN, "--shortstat", `${base}...HEAD`], cwd).trim();
+  return safeGit(["diff", ...DIFF_HARDEN, "--shortstat", `${base}...HEAD`], cwd).stdout.trim();
 }
 
 export function gatherReviewDiffs(cwd, base) {

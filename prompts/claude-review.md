@@ -19,7 +19,7 @@ Accepted arguments (parsed by the companion script, not by you):
 Rules:
 
 - This is review-only. Do not apply fixes, suggest patches as if you are about to apply them, or rewrite Claude's review.
-- Do not pre-read the diff yourself. Let Claude do it — that is the entire point of the delegation.
+- Do not pre-read or alter the diff yourself. The companion script collects the diff (`git status` / `git diff` / `git diff --cached` / `git diff <base>...HEAD`) and embeds it in the prompt that goes to Claude — relay Claude's output verbatim.
 - If the companion reports "not a git repository", surface that error as-is.
 
 ## User request

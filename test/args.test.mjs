@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseArgs, splitRawArgumentString } from "../scripts/lib/args.mjs";
+import { parseArgs, parseAskTokens, splitRawArgumentString } from "../scripts/lib/args.mjs";
 
 // splitRawArgumentString
 
@@ -70,4 +70,37 @@ test("parseArgs: boolean flag has no value", () => {
   });
   assert.equal(flags.get("background"), true);
   assert.deepEqual(positional, ["hello"]);
+});
+
+// parseAskTokens — `ask` keeps unknown --flags in the prompt (only --background
+// is consumed) so prompts like `what does --base do?` are not silently mangled.
+
+test("parseAskTokens: --background as the first token sets background", () => {
+  const r = parseAskTokens(["--background", "hello", "world"]);
+  assert.equal(r.background, true);
+  assert.equal(r.prompt, "hello world");
+});
+
+test("parseAskTokens: --background anywhere sets background", () => {
+  const r = parseAskTokens(["hello", "--background", "world"]);
+  assert.equal(r.background, true);
+  assert.equal(r.prompt, "hello world");
+});
+
+test("parseAskTokens: unknown --flag stays in the prompt verbatim", () => {
+  const r = parseAskTokens(["what", "does", "--base", "do", "in", "this", "repo?"]);
+  assert.equal(r.background, false);
+  assert.equal(r.prompt, "what does --base do in this repo?");
+});
+
+test("parseAskTokens: prompt with --base value-shaped argument is preserved", () => {
+  const r = parseAskTokens(["explain", "--focus", "auth", "middleware"]);
+  assert.equal(r.background, false);
+  assert.equal(r.prompt, "explain --focus auth middleware");
+});
+
+test("parseAskTokens: empty / non-array input is safe", () => {
+  assert.deepEqual(parseAskTokens([]), { background: false, prompt: "" });
+  assert.deepEqual(parseAskTokens(undefined), { background: false, prompt: "" });
+  assert.deepEqual(parseAskTokens(null), { background: false, prompt: "" });
 });

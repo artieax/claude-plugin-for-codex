@@ -4,7 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
+import { parseArgs, parseAskTokens, splitRawArgumentString } from "./lib/args.mjs";
 import { appendFile, readStdin } from "./lib/fs.mjs";
 import { buildAskArgv, buildReviewArgv, spawnClaude } from "./lib/claude.mjs";
 import {
@@ -18,6 +18,7 @@ import {
   ROOT,
   autoPruneByEnv,
   generateJobId,
+  isValidJobId,
   jobFile,
   jobLog,
   latestJob,
@@ -42,6 +43,18 @@ function capDiffSection(s, label) {
     s.slice(0, REVIEW_SECTION_CAP) +
     `\n\n[${label} truncated at ${REVIEW_SECTION_CAP} bytes]\n`
   );
+}
+
+// Render a {stdout, stderr, ok} result from safeGit into the body of a review
+// prompt section. Failures embed the stderr as a [git error] block so Claude
+// can distinguish "no diff" from "git failed" (e.g. missing merge base).
+function renderDiffSection(label, result) {
+  if (!result.ok) {
+    const msg = (result.stderr || "").trim() || "git command failed";
+    return `[git error] ${label} could not be collected:\n${msg}`;
+  }
+  const capped = capDiffSection(result.stdout, label);
+  return capped || "(empty)";
 }
 
 // Live console output stays raw; on-disk log is redacted by default
@@ -117,11 +130,7 @@ function spawnWorker(kind, cwd, prompt, extra = {}) {
 }
 
 async function cmdAsk(tokens) {
-  const { flags, positional } = parseArgs(tokens, {
-    booleanFlags: new Set(["background"]),
-  });
-  const background = flags.get("background") === true;
-  let prompt = positional.join(" ").trim();
+  let { background, prompt } = parseAskTokens(tokens);
   if (!prompt) {
     const piped = await readStdin();
     if (piped) prompt = piped.trim();
@@ -164,14 +173,18 @@ async function cmdReview(tokens) {
 
   // Companion gathers the diff via execFileSync (no shell, no Bash for Claude).
   // Claude reviews the embedded text and uses Read/Grep/Glob to look up
-  // surrounding code as needed.
+  // surrounding code as needed. Each section may be a real diff, "(empty)",
+  // or a "[git error] …" block when git itself failed (e.g. no merge base).
   const diffs = gatherReviewDiffs(cwd, base);
+  const statusBody = diffs.status.ok
+    ? (diffs.status.stdout || "(clean)")
+    : `[git error] git status failed:\n${(diffs.status.stderr || "").trim() || "git command failed"}`;
   const sections = [
-    ["git status --short", diffs.status || "(clean)"],
-    ["git diff --stat", diffs.diffStat || "(empty)"],
-    ["git diff (unstaged)", capDiffSection(diffs.diff, "git diff") || "(empty)"],
-    ["git diff --cached (staged)", capDiffSection(diffs.diffCached, "git diff --cached") || "(empty)"],
-    [`git diff ${base}...HEAD`, capDiffSection(diffs.diffBase, "git diff base...HEAD") || "(empty)"],
+    ["git status --short", statusBody],
+    ["git diff --stat", renderDiffSection("git diff --stat", diffs.diffStat)],
+    ["git diff (unstaged)", renderDiffSection("git diff", diffs.diff)],
+    ["git diff --cached (staged)", renderDiffSection("git diff --cached", diffs.diffCached)],
+    [`git diff ${base}...HEAD`, renderDiffSection(`git diff ${base}...HEAD`, diffs.diffBase)],
   ];
   const diffBlock = sections
     .map(([label, body]) => `----- ${label} -----\n${body}`)
@@ -194,9 +207,15 @@ async function cmdReview(tokens) {
   }
 }
 
+function rejectBadId(verb, id) {
+  process.stderr.write(`claude-companion ${verb}: invalid job id (expected 12 hex chars): ${id}\n`);
+  process.exit(2);
+}
+
 function cmdStatus(tokens) {
   const { positional } = parseArgs(tokens);
   if (positional.length) {
+    if (!isValidJobId(positional[0])) rejectBadId("status", positional[0]);
     process.stdout.write(renderJob(readJob(positional[0])));
   } else {
     process.stdout.write(renderStatusTable(listJobsNewestFirst()));
@@ -205,6 +224,7 @@ function cmdStatus(tokens) {
 
 function cmdResult(tokens) {
   const { positional } = parseArgs(tokens);
+  if (positional[0] && !isValidJobId(positional[0])) rejectBadId("result", positional[0]);
   const job = positional[0] ? readJob(positional[0]) : latestJob();
   if (!job) {
     process.stderr.write("No jobs found.\n");
@@ -220,6 +240,7 @@ function cmdCancel(tokens) {
     process.stderr.write("claude-companion cancel: job id required\n");
     process.exit(2);
   }
+  if (!isValidJobId(id)) rejectBadId("cancel", id);
   const job = readJob(id);
   if (!job) {
     process.stderr.write("claude-companion cancel: job not found\n");
@@ -317,7 +338,7 @@ function cmdSetup() {
 
 async function cmdWorker(tokens) {
   const id = tokens[0];
-  if (!id) process.exit(2);
+  if (!id || !isValidJobId(id)) process.exit(2);
   const job = readJob(id);
   if (!job) process.exit(2);
   // pending → cancelled race: if cancel landed before the worker started,

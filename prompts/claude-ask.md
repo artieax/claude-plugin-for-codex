@@ -14,6 +14,6 @@ Rules:
 - Do not modify, summarize, or re-interpret Claude's response. Frame it with a single line like `Claude:` and then paste stdout verbatim.
 - Do not add `--background` unless the user explicitly asked for it. Default to foreground.
 - If the command exits non-zero, relay stderr and suggest the user run `/claude-setup`.
-- Do not loosen the tool allowlist. Claude is invoked with `Read Grep Glob` only. If the user wants Claude to edit files, stop and ask them to confirm before you start adding flags.
+- Claude is always invoked read-only (`Read Grep Glob`). This plugin intentionally has no flag to loosen that — if the user wants Claude to edit files, that is out of scope for this delegation bridge.
 
 ## User request

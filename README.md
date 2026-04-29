@@ -1,29 +1,59 @@
 # claude-plugin-for-codex
 
-Delegate from Codex CLI to Claude Code.
+A lightweight bridge that lets Codex call Claude Code as a **read-only second reviewer** — no MCP, just shell-out, with built-in job management.
 
-This is a small bridge that lets Codex ask Claude Code for a second opinion without wiring MCP or replacing your Codex workflow. Use it when you want Claude to inspect a codebase while you stay inside Codex, get an independent review pass from a different coding agent, or run background Claude jobs while Codex continues the main session.
+OpenAI's official `codex-plugin-cc` goes the other direction (call Codex *from* Claude Code). This plugin is the inverse: while you're driving Codex, you can ask Claude for a delegated read-only opinion or review without leaving the session.
 
 ## What it provides
 
-| Command          | What it does                                                     |
-| ---------------- | ---------------------------------------------------------------- |
-| `/claude-ask`    | Delegate a read-only task or question to Claude.                 |
-| `/claude-review` | Have Claude review the current git diff against a base branch.  |
-| `/claude-status` | List active and recent Claude delegation jobs.                   |
-| `/claude-result` | Fetch the stored output of a finished job.                       |
-| `/claude-cancel` | Cancel a running job.                                            |
-| `/claude-setup`  | Diagnose the install and Claude CLI auth.                        |
+Three modes, same dispatcher (`scripts/claude-companion.mjs`).
 
-`/claude-review` is not a replacement for Codex's built-in `/review`. It delegates to Claude Code as a separate agent, giving you a second opinion from a different model and reasoning pipeline.
+### Codex plugin + skill *(primary; new Codex builds)*
 
-There are three ways to drive these commands, in order of preference:
+Codex auto-discovers `.codex-plugin/plugin.json` and `skills/claude-companion/SKILL.md`. In skill mode the entry point is `$claude-companion …`:
 
-1. **Codex plugin + skill** *(primary)* — `.codex-plugin/plugin.json` + `skills/claude-companion/SKILL.md`. Codex auto-discovers the skill by name/description and surfaces it in the slash menu. This is what the OpenAI Codex docs steer new add-ons toward.
-2. **Codex custom prompts** *(legacy fallback)* — the `.md` files in `prompts/`, copied to `~/.codex/prompts/`. Custom Prompts are deprecated upstream in favor of skills, but they still work and remain useful for older Codex builds. The installer drops them in for compatibility.
-3. **Direct CLI** — `claude-companion ask|review|status|…` works from any shell, no Codex required.
+```
+$claude-companion ask where is rate limiting implemented?
+$claude-companion review --base develop --focus auth middleware
+$claude-companion status
+```
 
-All three call into the same dispatcher: `scripts/claude-companion.mjs`. It builds the right `claude` CLI invocation (with a read-only tool allowlist), spawns it, captures stdout/stderr, and persists per-job state under `~/.claude-plugin-for-codex/jobs/`.
+This is what the OpenAI Codex docs steer new add-ons toward.
+
+### Custom prompts *(legacy; older Codex builds)*
+
+The `.md` files under `prompts/` are copied to `~/.codex/prompts/` by the installer. Custom Prompts are deprecated upstream in favor of skills but still work, with a different invocation prefix:
+
+```
+/claude-ask where is rate limiting implemented?
+/claude-review --base develop --focus auth middleware
+/claude-status
+```
+
+> The installer ships **both** layouts so the same repo works with old and new Codex builds. Use `$claude-companion <verb>` if your Codex shows skills, `/claude-<verb>` otherwise. (Some Codex builds also surface custom prompts as `/prompts:claude-ask`.)
+
+### Direct CLI *(any shell, no Codex)*
+
+```sh
+claude-companion ask "what does this repo do?"
+claude-companion review --base main
+claude-companion status
+```
+
+### Verbs
+
+| Verb       | What it does                                                    |
+| ---------- | --------------------------------------------------------------- |
+| `ask`      | Delegate a read-only task or question to Claude.                |
+| `review`   | Have Claude review the current git diff against a base branch. |
+| `status`   | List active and recent Claude delegation jobs.                  |
+| `result`   | Fetch the stored output of a finished job.                      |
+| `cancel`   | Cancel a running job.                                           |
+| `setup`    | Diagnose the install and Claude CLI auth.                       |
+
+`review` is not a replacement for Codex's built-in `/review`; it delegates to Claude Code as a separate agent, giving you an independent pass from a different model and reasoning pipeline.
+
+All entry points call the same dispatcher, which builds a `claude` CLI invocation with a read-only tool allowlist, spawns it, captures stdout/stderr, and persists per-job state under `~/.claude-plugin-for-codex/jobs/`.
 
 ## Architecture
 
@@ -96,6 +126,19 @@ claude-plugin-for-codex upgrade
 
 ## Use
 
+Skill mode (new Codex):
+
+```
+$claude-companion ask where is rate limiting implemented in this repo?
+$claude-companion review --base develop --focus auth middleware
+$claude-companion review --background
+$claude-companion status
+$claude-companion result 4f8b1a9c2d01
+$claude-companion cancel 4f8b1a9c2d01
+```
+
+Legacy custom-prompt mode (older Codex):
+
 ```
 /claude-ask where is rate limiting implemented in this repo?
 /claude-review --base develop --focus auth middleware
@@ -105,11 +148,9 @@ claude-plugin-for-codex upgrade
 /claude-cancel 4f8b1a9c2d01
 ```
 
-> **Codex version note:** Depending on your Codex build, custom prompts may appear in the slash-command menu as `/claude-ask` or `/prompts:claude-ask`. Run `/` in Codex to see which form your version uses. Both work identically.
+> **`--focus` tip:** Multi-word focus strings do not require quoting — `--focus auth middleware` works as-is. Quoted forms also work: `--focus "auth middleware"`.
 
-> **`--focus` tip:** Multi-word focus strings do not require quoting — `/claude-review --focus auth middleware` works as-is. Quoted forms also work: `--focus "auth middleware"`.
-
-Direct CLI usage (without Codex) also works:
+Direct CLI usage (without Codex):
 
 ```sh
 claude-companion ask "what does this repo do?"
@@ -129,6 +170,8 @@ Both are plain files; delete the directory to wipe history.
 
 - **Best-effort redaction** of common secret shapes (API keys, JWTs, PEMs) is applied at the persistence boundary, so on-disk records never see raw values. Disable with `CLAUDE_COMPANION_REDACT=0`.
 - **30-day auto-prune** runs on every command. Override with `CLAUDE_COMPANION_RETENTION_DAYS=N`, or disable with `CLAUDE_COMPANION_RETENTION_DAYS=0`.
+
+> **Background mode caveat:** background jobs persist the prompt to disk so the worker can rebuild the `claude` argv after the parent exits. Persistence goes through the same redaction pipeline, so any secret-shaped tokens in your prompt (e.g. `ghp_…`, `sk-ant-…`, JWTs) will be replaced with `[REDACTED]` *before* the worker invokes Claude. If your prompt intentionally contains a secret-shaped string and you need Claude to see the raw value, use foreground mode (default) — it builds the argv in-process and never writes the prompt to disk in raw form.
 
 You can also prune manually:
 

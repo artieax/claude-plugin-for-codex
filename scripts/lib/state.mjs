@@ -10,15 +10,30 @@ export const ROOT =
     : path.join(os.homedir(), ".claude-plugin-for-codex");
 export const JOBS_DIR = path.join(ROOT, "jobs");
 
+// generateJobId emits 12 hex chars; assertJobId is the inverse contract for
+// any caller that takes a job id from user input (status/result/cancel/etc.)
+// so a value like `../foo` can never escape JOBS_DIR.
+const JOB_ID_RE = /^[a-f0-9]{12}$/;
+export function isValidJobId(id) {
+  return typeof id === "string" && JOB_ID_RE.test(id);
+}
+export function assertJobId(id) {
+  if (!isValidJobId(id)) {
+    throw new Error("invalid job id");
+  }
+}
+
 export function generateJobId() {
   return crypto.randomBytes(6).toString("hex");
 }
 
 export function jobFile(id) {
+  assertJobId(id);
   return path.join(JOBS_DIR, `${id}.json`);
 }
 
 export function jobLog(id) {
+  assertJobId(id);
   return path.join(JOBS_DIR, `${id}.log`);
 }
 
@@ -32,6 +47,7 @@ export function listJobs() {
 }
 
 export function readJob(id) {
+  if (!isValidJobId(id)) return null;
   return readJson(jobFile(id));
 }
 
