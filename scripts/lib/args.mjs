@@ -1,12 +1,21 @@
 // `ask` accepts free-form prompt text that often contains `--flag`-shaped tokens
 // (e.g. `what does --base do?`). parseArgs would consume those as flags and
-// drop them from the prompt, so ask uses this stricter splitter: only the
-// `--background` boolean is recognized; everything else stays in the prompt.
+// drop them from the prompt, so ask uses this stricter splitter: only a tiny
+// allowlist of booleans (--background, --summary, --raw) is recognized;
+// everything else stays in the prompt.
+const ASK_BOOLEAN_FLAGS = new Set(["--background", "--summary", "--raw"]);
 export function parseAskTokens(tokens) {
   const list = Array.isArray(tokens) ? tokens : [];
-  const background = list.includes("--background");
-  const promptTokens = list.filter((t) => t !== "--background");
-  return { background, prompt: promptTokens.join(" ").trim() };
+  const present = new Set(list.filter((t) => ASK_BOOLEAN_FLAGS.has(t)));
+  const promptTokens = list.filter((t) => !ASK_BOOLEAN_FLAGS.has(t));
+  // --summary wins over --raw if both are passed (last-flag-wins is fragile
+  // when tokens come from a single $ARGUMENTS string with unspecified order).
+  const mode = present.has("--summary") ? "summary" : "raw";
+  return {
+    background: present.has("--background"),
+    mode,
+    prompt: promptTokens.join(" ").trim(),
+  };
 }
 
 // restFlags: flag names whose value consumes all remaining tokens until the next --flag.

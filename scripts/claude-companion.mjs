@@ -65,8 +65,8 @@ function printUsage() {
   process.stdout.write(
     [
       "Usage:",
-      "  claude-companion ask [--background] <prompt...>",
-      "  claude-companion review [--background] [--base <ref>] [--focus <text>]",
+      "  claude-companion ask [--background] [--summary|--raw] <prompt...>",
+      "  claude-companion review [--background] [--summary|--raw] [--base <ref>] [--focus <text>]",
       "  claude-companion status [<job-id>]",
       "  claude-companion result [<job-id>]",
       "  claude-companion cancel <job-id>",
@@ -130,7 +130,7 @@ function spawnWorker(kind, cwd, prompt, extra = {}) {
 }
 
 async function cmdAsk(tokens) {
-  let { background, prompt } = parseAskTokens(tokens);
+  let { background, mode, prompt } = parseAskTokens(tokens);
   if (!prompt) {
     const piped = await readStdin();
     if (piped) prompt = piped.trim();
@@ -139,23 +139,25 @@ async function cmdAsk(tokens) {
     process.stderr.write("claude-companion ask: no prompt given\n");
     process.exit(2);
   }
-  const argv = buildAskArgv({ prompt });
+  const argv = buildAskArgv({ prompt, mode });
   if (background) {
-    const id = spawnWorker("ask", process.cwd(), prompt);
+    const id = spawnWorker("ask", process.cwd(), prompt, { mode });
     process.stdout.write(
       `Started background job ${id}. Check with \`/claude-status ${id}\` or \`/claude-result ${id}\`.\n`,
     );
   } else {
-    await runInline("ask", argv, process.cwd(), prompt);
+    await runInline("ask", argv, process.cwd(), prompt, { mode });
   }
 }
 
 async function cmdReview(tokens) {
   const { flags, positional } = parseArgs(tokens, {
-    booleanFlags: new Set(["background"]),
+    booleanFlags: new Set(["background", "summary", "raw"]),
     restFlags: new Set(["focus"]),
   });
   const background = flags.get("background") === true;
+  // --summary wins if both --summary and --raw are present.
+  const mode = flags.get("summary") === true ? "summary" : "raw";
   const cwd = process.cwd();
   if (!ensureGitRepo(cwd)) {
     process.stderr.write("claude-companion review: not a git repository\n");
@@ -198,12 +200,12 @@ async function cmdReview(tokens) {
     `\n\nReport: (1) bugs or correctness issues, (2) security concerns, ` +
     `(3) test coverage gaps, (4) anything surprising. ` +
     `Be concrete — quote file paths and line numbers.${focusLine}`;
-  const argv = buildReviewArgv({ prompt });
+  const argv = buildReviewArgv({ prompt, mode });
   if (background) {
-    const id = spawnWorker("review", cwd, prompt, { base, focus });
+    const id = spawnWorker("review", cwd, prompt, { base, focus, mode });
     process.stdout.write(`Started background review job ${id}.\n`);
   } else {
-    await runInline("review", argv, cwd, prompt, { base, focus });
+    await runInline("review", argv, cwd, prompt, { base, focus, mode });
   }
 }
 
@@ -346,9 +348,10 @@ async function cmdWorker(tokens) {
   if (job.status === "cancelled") process.exit(0);
   // Rebuild argv from the structured payload — we deliberately don't persist
   // argv (would embed the raw -p prompt slot in the on-disk record).
+  const mode = job.mode === "summary" ? "summary" : "raw";
   const argv = job.kind === "review"
-    ? buildReviewArgv({ prompt: job.prompt })
-    : buildAskArgv({ prompt: job.prompt });
+    ? buildReviewArgv({ prompt: job.prompt, mode })
+    : buildAskArgv({ prompt: job.prompt, mode });
   upsertJob({ id, status: "running", pid: process.pid });
   const { child, done } = spawnClaude(argv, {
     cwd: job.cwd,

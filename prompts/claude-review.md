@@ -1,6 +1,6 @@
 ---
 description: Have Claude review the current git diff against a base branch
-argument-hint: '[--background] [--base <ref>] [--focus <text>] [focus text]'
+argument-hint: '[--background] [--summary|--raw] [--base <ref>] [--focus <text>] [focus text]'
 ---
 
 Run this shell command and relay its stdout verbatim:
@@ -14,6 +14,8 @@ Accepted arguments (parsed by the companion script, not by you):
 - `--base <ref>` — base branch. Defaults to `main` or `master` (autodetected).
 - `--focus <text>` — extra focus line appended to the review prompt.
 - `--background` — run asynchronously. Relay the printed job id and tell the user to use `/claude-status` or `/claude-result`.
+- `--summary` — ask Claude for a short bullet-list review (≤ 8 bullets, ≤ 200 words) instead of a full review. Use for "quick review" / "tl;dr review" requests.
+- `--raw` — explicit verbatim mode (default; pass only if the user is opting back in after a `--summary`).
 - Any remaining positional text after flags is also treated as focus text.
 
 Rules:

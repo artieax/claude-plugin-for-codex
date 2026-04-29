@@ -2,28 +2,40 @@ import { spawn } from "node:child_process";
 
 export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
 
+// Suffix appended to the user prompt when mode === "summary". Kept short and
+// declarative so Codex can still relay output verbatim without re-summarizing.
+const SUMMARY_SUFFIX =
+  "\n\nOutput format: respond with at most 8 short bullets, " +
+  "≤ 200 words total. Cite file:line. " +
+  "Do not include preamble, headings, or closing remarks — bullets only.";
+
+export function decorateForMode(prompt, mode) {
+  return mode === "summary" ? `${prompt}${SUMMARY_SUFFIX}` : prompt;
+}
+
 export function buildAskArgv({
   prompt,
   allowedTools = READ_ONLY_TOOLS,
   permissionMode = "dontAsk",
+  mode = "raw",
 }) {
   const argv = ["--output-format", "text", "--permission-mode", permissionMode];
   // --tools restricts which tools Claude may use; --allowedTools bypasses the prompt
   argv.push("--tools", READ_ONLY_TOOLS.join(","));
   argv.push("--allowedTools", ...allowedTools);
-  argv.push("-p", prompt);
+  argv.push("-p", decorateForMode(prompt, mode));
   return argv;
 }
 
 // Review uses the same read-only allowlist as ask. The companion gathers the
 // git diff itself (via execFileSync) and embeds it in the prompt, so Claude
 // never needs Bash. --disallowedTools is kept as a defense-in-depth guard.
-export function buildReviewArgv({ prompt, permissionMode = "dontAsk" }) {
+export function buildReviewArgv({ prompt, permissionMode = "dontAsk", mode = "raw" }) {
   const argv = ["--output-format", "text", "--permission-mode", permissionMode];
   argv.push("--tools", READ_ONLY_TOOLS.join(","));
   argv.push("--allowedTools", ...READ_ONLY_TOOLS);
   argv.push("--disallowedTools", "Edit", "Write", "MultiEdit", "Bash");
-  argv.push("-p", prompt);
+  argv.push("-p", decorateForMode(prompt, mode));
   return argv;
 }
 

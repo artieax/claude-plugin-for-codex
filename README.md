@@ -50,6 +50,9 @@ claude-companion status
 | `result`   | Fetch the stored output of a finished job.                      |
 | `cancel`   | Cancel a running job.                                           |
 | `setup`    | Diagnose the install and Claude CLI auth.                       |
+| `prune`    | Delete finished job records (`--all` or `--older-than`).        |
+
+`ask` and `review` accept `--raw` (default; verbatim relay) or `--summary` (≤ 8 bullets, ≤ 200 words). Use `--summary` when the verbatim relay would be too noisy for the inline UX.
 
 `review` is not a replacement for Codex's built-in `/review`; it delegates to Claude Code as a separate agent, giving you an independent pass from a different model and reasoning pipeline.
 
@@ -130,8 +133,10 @@ Skill mode (new Codex):
 
 ```
 $claude-companion ask where is rate limiting implemented in this repo?
+$claude-companion ask --summary what does this repo do?
 $claude-companion review --base develop --focus auth middleware
 $claude-companion review --background
+$claude-companion review --summary
 $claude-companion status
 $claude-companion result 4f8b1a9c2d01
 $claude-companion cancel 4f8b1a9c2d01
@@ -161,7 +166,7 @@ claude-companion status
 
 ## State
 
-- `~/.claude-plugin-for-codex/jobs/<id>.json` — per-job record (kind, status, argv, cwd, stdout, stderr, timing)
+- `~/.claude-plugin-for-codex/jobs/<id>.json` — per-job record (kind, status, prompt, cwd, base, focus, stdout, stderr, exitCode, timing). The raw `claude` argv is **not** stored — the worker rebuilds it from the structured payload at run time so the on-disk record never contains the `-p <prompt>` slot directly.
 - `~/.claude-plugin-for-codex/jobs/<id>.log` — interleaved stdout+stderr stream captured during the run
 
 Both are plain files; delete the directory to wipe history.

@@ -100,7 +100,42 @@ test("parseAskTokens: prompt with --base value-shaped argument is preserved", ()
 });
 
 test("parseAskTokens: empty / non-array input is safe", () => {
-  assert.deepEqual(parseAskTokens([]), { background: false, prompt: "" });
-  assert.deepEqual(parseAskTokens(undefined), { background: false, prompt: "" });
-  assert.deepEqual(parseAskTokens(null), { background: false, prompt: "" });
+  assert.deepEqual(parseAskTokens([]), { background: false, mode: "raw", prompt: "" });
+  assert.deepEqual(parseAskTokens(undefined), { background: false, mode: "raw", prompt: "" });
+  assert.deepEqual(parseAskTokens(null), { background: false, mode: "raw", prompt: "" });
+});
+
+// parseAskTokens — --summary / --raw output mode flags
+
+test("parseAskTokens: --summary sets mode=summary", () => {
+  const r = parseAskTokens(["--summary", "what", "does", "this", "do?"]);
+  assert.equal(r.mode, "summary");
+  assert.equal(r.prompt, "what does this do?");
+});
+
+test("parseAskTokens: --raw sets mode=raw (explicit)", () => {
+  const r = parseAskTokens(["--raw", "explain", "x"]);
+  assert.equal(r.mode, "raw");
+  assert.equal(r.prompt, "explain x");
+});
+
+test("parseAskTokens: default mode is raw when no flag passed", () => {
+  const r = parseAskTokens(["explain", "x"]);
+  assert.equal(r.mode, "raw");
+});
+
+test("parseAskTokens: --summary wins when both --summary and --raw are present", () => {
+  // Order is not guaranteed when tokens come from a single $ARGUMENTS string,
+  // so we deterministically prefer summary to avoid flaky behavior.
+  const r1 = parseAskTokens(["--summary", "--raw", "x"]);
+  const r2 = parseAskTokens(["--raw", "--summary", "x"]);
+  assert.equal(r1.mode, "summary");
+  assert.equal(r2.mode, "summary");
+});
+
+test("parseAskTokens: --summary and --background combine independently", () => {
+  const r = parseAskTokens(["--background", "--summary", "review the X module"]);
+  assert.equal(r.background, true);
+  assert.equal(r.mode, "summary");
+  assert.equal(r.prompt, "review the X module");
 });
